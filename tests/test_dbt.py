@@ -185,9 +185,10 @@ class TwoSeasonsStub(TransfermarktStub):
             return httpx.Response(200, json={"success": True, "data": {"squad": members}})
         if path == "/players":
             self.players_answered += 1
-            moved = PLAYERS["101"] | {}
-            moved["clubAssignments"] = [{"type": "current", "clubId": self.NEW_CLUB_ID}]
-            players = PLAYERS | ({"101": moved} if self.players_answered > 1 else {})
+            players = dict(PLAYERS)
+            if self.players_answered > 1:
+                moved = [{"type": "current", "clubId": self.NEW_CLUB_ID}]
+                players["101"] = PLAYERS["101"] | {"clubAssignments": moved}
             ids = request.url.params.get_list("ids[]")
             return httpx.Response(
                 200, json={"success": True, "data": [players[i] for i in ids if i in players]}
