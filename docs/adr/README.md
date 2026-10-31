@@ -34,3 +34,4 @@
 - [32. The Reep register is the first mapping layer of Identity Resolution](0032-reep-first-mapping-layer.md)
 - [33. The Reep register maps Clubs; the club seed goes](0033-reep-maps-clubs.md) — superseded
 - [34. Canonical IDs are ours, created from Reep, then Transfermarkt](0034-canonical-ids-are-ours.md)
+- [35. The PoC covers last season only; Transfermarkt squads for that season](0035-poc-covers-last-season.md)
