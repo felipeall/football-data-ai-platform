@@ -38,20 +38,23 @@ Reep publishes data releases on `data.reep.football`, named by a stamp such as `
 
 **Pinning.** `REEP__RELEASE` in `.env` names the release to use, for example `REEP__RELEASE=2026-10-25.1`. The tag is always explicit, never "latest".
 
+**Where a release's files are.** Each release has a file list, `https://data.reep.football/releases/<stamp>/release.json`. Under `files`, it gives every file of the release (the manifest included) a `key`, a `sha256` and a size in `bytes`. The files are served from `https://data.reep.football/<key>`, under `releases/<stamp>/objects/<id>/`. Older releases are served this way too. The flat paths `releases/<stamp>/<file>` answer 404 since October 2026.
+
 **Checking for a new release: `football-intel reep-status`.** It downloads only small JSON files, never the bridges:
 
 1. `https://data.reep.football/releases/latest.json`: its `stamp` is the current release.
-2. The manifest of each release from the pinned one up to the current one: `https://data.reep.football/releases/<stamp>/manifest.json`. Each manifest's `diff` describes the change from its predecessor: new bridges per provider, entity deltas, ID retention, redirects, and the gate result.
+2. The manifest of each release from the pinned one up to the current one, found through that release's file list (above). Each manifest's `diff` describes the change from its predecessor: new bridges per provider, entity deltas, ID retention, redirects, and the gate result.
 
 It prints the pinned release, the releases loaded into the database, the current release, and the changes in between for Sofascore, Transfermarkt and Understat. That is enough to decide whether an upgrade is worth the download.
 
 **Downloading and loading: `football-intel load-reep`.** For the pinned release, it:
 
-1. **Fetches the manifest** from `https://data.reep.football/releases/<tag>/manifest.json` and keeps it as `data/reep/<tag>/manifest.json`.
-2. **Downloads** `bridges.parquet` (about 376 MB, every entity type) and `redirects.parquet` (under 1 MB) from `https://data.reep.football/releases/<tag>/` into `data/reep/<tag>/`. The links on reep.football's downloads page were broken when this was written ("latest.json missing manifest_url"); the release URLs are not.
-3. **Verifies each file's SHA-256** against the manifest's `checksums_sha256`. A mismatch stops the command. Files already present with the right checksum are not downloaded again.
-4. **Keeps player bridges** for Sofascore (`player`), Transfermarkt (`spieler`) and Understat (`player`), with each Reep ID resolved through the redirects to its survivor. Only persons that Reep maps to a Sofascore player are kept, about 28k. *(Replaced by ADR 34: person and team bridges of every entity bridged to at least two of the three providers, about 29k persons and 9k teams.)*
-5. **Loads them** into the `reference` tables under the tag, replacing that tag's rows if it was loaded before, and records the manifest's gate result and diff with it.
+1. **Reads the file list** at `https://data.reep.football/releases/<tag>/release.json`. A file it does not list, or one keyed outside `releases/<tag>/`, stops the command.
+2. **Fetches the manifest** from its key, checks it against the list's SHA-256, and keeps it, byte for byte, as `data/reep/<tag>/manifest.json`.
+3. **Downloads** `bridges.parquet` (about 376 MB, every entity type) and `redirects.parquet` (under 1 MB) from their keys into `data/reep/<tag>/`. The local layout does not follow Reep's `objects/` keys.
+4. **Verifies each file's SHA-256** against both the file list and the manifest's `checksums_sha256`. A mismatch stops the command and leaves no file behind. Files already present with the right checksum are not downloaded again.
+5. **Keeps player bridges** for Sofascore (`player`), Transfermarkt (`spieler`) and Understat (`player`), with each Reep ID resolved through the redirects to its survivor. Only persons that Reep maps to a Sofascore player are kept, about 28k. *(Replaced by ADR 34: person and team bridges of every entity bridged to at least two of the three providers, about 29k persons and 9k teams.)*
+6. **Loads them** into the `reference` tables under the tag, replacing that tag's rows if it was loaded before, and records the manifest's gate result and diff with it.
 
 `data/` is outside version control, so the files stay on the machine that ran the command. The hosted stack (M7) runs the same command against its own database.
 

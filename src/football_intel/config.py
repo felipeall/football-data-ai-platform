@@ -8,7 +8,7 @@ from football_intel.sources.sofascore import SofascorePolicy
 
 
 class ReepSettings(BaseModel):
-    """The pinned release of the Reep register (ADR 32), e.g. REEP__RELEASE=2026-10-25.1."""
+    """The pinned release of the Reep register (ADR 32), e.g. REEP__RELEASE=2026-10-31.1."""
 
     release: str | None = None
 

@@ -2,6 +2,7 @@
 data is committed (ADR 4): every bridge here is made up."""
 
 import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -77,30 +78,77 @@ def _manifest(files: dict[str, bytes], previous: str | None = PREVIOUS) -> dict[
     }
 
 
+OBJECTS = "objects/0b7e1c2a-0000-4000-8000-000000000000"
+
+
+def _release_json(release_tag: str, manifest: bytes, files: dict[str, bytes]) -> dict[str, Any]:
+    """A `release.json` (reep-public-release/v4) listing the manifest and files by key."""
+    listed = {"manifest.json": manifest, **files}
+    return {
+        "schema": "reep-public-release/v4",
+        "stamp": release_tag,
+        "files": {
+            name: {
+                "key": f"releases/{release_tag}/{OBJECTS}/{name}",
+                "sha256": hashlib.sha256(body).hexdigest(),
+                "bytes": len(body),
+            }
+            for name, body in listed.items()
+        },
+    }
+
+
 class ReepStub:
-    """Serves releases like data.reep.football, and records every request."""
+    """Serves releases like data.reep.football, and records every request.
+
+    Each release is its `release.json` and the objects it keys. Flat paths
+    (`releases/<stamp>/manifest.json`) answer 404, as Reep's do.
+    """
 
     def __init__(self, releases: dict[str, tuple[dict[str, Any], dict[str, bytes]]], latest: str):
-        self.releases = releases
         self.latest = latest
+        self.release_jsons: dict[str, dict[str, Any]] = {}
+        self.objects: dict[str, bytes] = {}
+        for stamp, (manifest, files) in releases.items():
+            self.publish(stamp, manifest, files)
         self.requests: list[str] = []
 
+    def publish(
+        self,
+        stamp: str,
+        manifest: dict[str, Any],
+        files: dict[str, bytes],
+        listed: dict[str, bytes] | None = None,
+    ) -> None:
+        """Serve `files`, listed in `release.json` with the checksums of `listed` (or `files`)."""
+        body = json.dumps(manifest).encode()
+        self.release_jsons[stamp] = _release_json(stamp, body, listed or files)
+        prefix = f"/releases/{stamp}/{OBJECTS}"
+        self.objects[f"{prefix}/manifest.json"] = body
+        for name, content in files.items():
+            self.objects[f"{prefix}/{name}"] = content
+
     def handle(self, request: httpx.Request) -> httpx.Response:
-        path = request.url.path.removeprefix("/releases")
+        path = request.url.path
         self.requests.append(path)
-        if path == "/latest.json":
+        if path == "/releases/latest.json":
             return httpx.Response(200, json={"stamp": self.latest})
-        stamp, name = path.strip("/").split("/")
-        manifest, files = self.releases[stamp]
-        if name == "manifest.json":
-            return httpx.Response(200, json=manifest)
-        return httpx.Response(200, content=files[name])
+        parts = path.strip("/").split("/")
+        if len(parts) == 3 and parts[2] == "release.json" and parts[1] in self.release_jsons:
+            return httpx.Response(200, json=self.release_jsons[parts[1]])
+        if path in self.objects:
+            return httpx.Response(200, content=self.objects[path])
+        return httpx.Response(404)
 
     def client(self) -> httpx.AsyncClient:
         return release.client(httpx.MockTransport(self.handle))
 
 
-async def test_a_release_downloads_once_verified(tmp_path: Path) -> None:
+def _object(stamp: str, name: str) -> str:
+    return f"/releases/{stamp}/{OBJECTS}/{name}"
+
+
+async def test_a_release_downloads_once_verified_from_its_objects(tmp_path: Path) -> None:
     files = _write_release(tmp_path / "source")
     stub = ReepStub({RELEASE: (_manifest(files), files)}, RELEASE)
     target = tmp_path / RELEASE
@@ -110,15 +158,22 @@ async def test_a_release_downloads_once_verified(tmp_path: Path) -> None:
         await release.download(api, RELEASE, target)
 
     assert manifest.gate_passed is False
-    assert (target / "manifest.json").exists()
-    # The second run finds both files verified and fetches only the manifest.
-    assert stub.requests.count(f"/{RELEASE}/bridges.parquet") == 1
+    # The manifest is kept as Reep published it, and the files in our flat local layout.
+    assert (target / "manifest.json").read_bytes() == stub.objects[
+        _object(RELEASE, "manifest.json")
+    ]
+    assert {name: (target / name).read_bytes() for name in release.FILES} == files
+    # The second run finds both files verified and fetches only release.json and the manifest.
+    assert stub.requests.count(_object(RELEASE, "bridges.parquet")) == 1
+    assert stub.requests.count(_object(RELEASE, "redirects.parquet")) == 1
+    assert not any(path.startswith(f"/releases/{RELEASE}/bridges") for path in stub.requests)
 
 
 async def test_a_checksum_mismatch_stops_the_download(tmp_path: Path) -> None:
     files = _write_release(tmp_path / "source")
     corrupt = {**files, "bridges.parquet": b"not the published file"}
-    stub = ReepStub({RELEASE: (_manifest(files), corrupt)}, RELEASE)
+    stub = ReepStub({}, RELEASE)
+    stub.publish(RELEASE, _manifest(files), corrupt, listed=files)
 
     with pytest.raises(release.ChecksumMismatchError):
         async with stub.client() as api:
@@ -126,6 +181,46 @@ async def test_a_checksum_mismatch_stops_the_download(tmp_path: Path) -> None:
 
     assert not (tmp_path / RELEASE / "bridges.parquet").exists()
     assert not (tmp_path / RELEASE / "bridges.parquet.partial").exists()
+
+
+async def test_a_release_json_checksum_mismatch_stops_the_download_with_no_file_behind(
+    tmp_path: Path,
+) -> None:
+    # The manifest and the served files agree; release.json says otherwise.
+    files = _write_release(tmp_path / "source")
+    stub = ReepStub({}, RELEASE)
+    stub.publish(RELEASE, _manifest(files), files, listed={**files, "bridges.parquet": b"other"})
+
+    with pytest.raises(release.ChecksumMismatchError):
+        async with stub.client() as api:
+            await release.download(api, RELEASE, tmp_path / RELEASE)
+
+    assert not (tmp_path / RELEASE).exists()
+    assert not any(path.endswith(".parquet") for path in stub.requests)
+
+
+async def test_a_manifest_not_matching_release_json_stops_the_download(tmp_path: Path) -> None:
+    files = _write_release(tmp_path / "source")
+    stub = ReepStub({RELEASE: (_manifest(files), files)}, RELEASE)
+    stub.objects[_object(RELEASE, "manifest.json")] = b"{}"
+
+    with pytest.raises(release.ChecksumMismatchError):
+        async with stub.client() as api:
+            await release.download(api, RELEASE, tmp_path / RELEASE)
+
+    assert not (tmp_path / RELEASE).exists()
+
+
+async def test_a_file_keyed_outside_its_release_is_refused(tmp_path: Path) -> None:
+    files = _write_release(tmp_path / "source")
+    stub = ReepStub({RELEASE: (_manifest(files), files)}, RELEASE)
+    stub.release_jsons[RELEASE]["files"]["bridges.parquet"]["key"] = "elsewhere/bridges.parquet"
+
+    with pytest.raises(release.ReleaseLayoutError):
+        async with stub.client() as api:
+            await release.download(api, RELEASE, tmp_path / RELEASE)
+
+    assert "/elsewhere/bridges.parquet" not in stub.requests
 
 
 async def test_status_walks_back_from_the_current_release_to_the_pinned_one(
@@ -144,6 +239,8 @@ async def test_status_walks_back_from_the_current_release_to_the_pinned_one(
     assert [m.release for m in newer] == ["2026-01-03.1", RELEASE]
     assert newer[0].new_bridges == {"transfermarkt": 5}
     assert none_newer == []
+    # Each manifest is read through its release.json; no bridges are downloaded.
+    assert _object(RELEASE, "manifest.json") in stub.requests
     assert not any(path.endswith(".parquet") for path in stub.requests)
 
 
