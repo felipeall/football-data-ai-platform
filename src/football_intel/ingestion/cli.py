@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import time
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -199,14 +200,28 @@ async def reep_status(settings: Settings) -> None:
     pinned = _pinned_reep_release(settings)
     async with await AsyncConnection.connect(settings.database_url, autocommit=True) as conn:
         cursor = await conn.execute(
-            "SELECT release, gate_passed, loaded_at FROM reference.reep_releases ORDER BY release"
+            """
+            SELECT release, gate_passed, loaded_at,
+                (SELECT count(DISTINCT reep_id) FROM reference.reep_player_bridges AS b
+                    WHERE b.release = r.release),
+                (SELECT count(*) FROM reference.reep_player_bridges AS b
+                    WHERE b.release = r.release),
+                (SELECT count(DISTINCT reep_id) FROM reference.reep_team_bridges AS b
+                    WHERE b.release = r.release),
+                (SELECT count(*) FROM reference.reep_team_bridges AS b
+                    WHERE b.release = r.release)
+            FROM reference.reep_releases AS r ORDER BY release
+            """
         )
         loaded = await cursor.fetchall()
     async with reep_release.client() as api:
         newer = await reep_release.releases_since(api, pinned)
     print(f"Pinned (REEP__RELEASE): {pinned}")
-    for release, gate_passed, loaded_at in loaded:
-        print(f"Loaded: {release} on {loaded_at:%Y-%m-%d %H:%M} UTC, gate passed: {gate_passed}")
+    for release, gate_passed, loaded_at, persons, person_rows, teams, team_rows in loaded:
+        print(
+            f"Loaded: {release} on {loaded_at:%Y-%m-%d %H:%M} UTC, gate passed: {gate_passed}; "
+            f"{persons} persons ({person_rows} bridges), {teams} teams ({team_rows} bridges)"
+        )
     if not loaded:
         print("Loaded: none; run `football-intel load-reep`")
     if not newer:
@@ -214,10 +229,13 @@ async def reep_status(settings: Settings) -> None:
         return
     print(f"Current: {newer[0].release}, {len(newer)} release(s) after the pinned one:")
     for manifest in newer:
+        # The manifest counts new bridges per provider, all entity types together.
         bridges = ", ".join(f"{p} +{manifest.new_bridges.get(p, 0)}" for p in REEP_PROVIDERS)
         diff = manifest.data.get("diff", {})
+        deltas = diff.get("entity_delta_by_type", {})
         print(
             f"  {manifest.release} (after {manifest.previous}): new bridges {bridges}; "
+            f"entities: players {deltas.get('player', 0):+}, teams {deltas.get('team', 0):+}; "
             f"ID retention {diff.get('id_retention_pct')} %; gate passed {manifest.gate_passed}"
         )
     print("To upgrade: set REEP__RELEASE, then run load-reep and resolve-identities.")
@@ -228,13 +246,18 @@ async def load_reep(settings: Settings) -> None:
     directory = REEP_DATA / release
     async with reep_release.client() as api:
         manifest = await reep_release.download(api, release, directory)
-    bridges = reep_load.player_bridges(directory)
+    started = time.monotonic()
+    loaded = {entity: reep_load.bridges(directory, entity) for entity in reep_load.ENTITIES}
     async with await AsyncConnection.connect(settings.database_url, autocommit=True) as conn:
-        await reep_load.load(conn, manifest, bridges)
-    persons = len({bridge[0] for bridge in bridges})
+        await reep_load.load(conn, manifest, loaded)
+    counts = ", ".join(
+        f"{len({bridge[0] for bridge in rows})} {entity.name} ({len(rows)} bridges)"
+        for entity, rows in loaded.items()
+    )
     print(
-        f"Reep {release}: {persons} persons with a Sofascore player, {len(bridges)} bridges "
-        f"loaded; release gate passed: {manifest.gate_passed}"
+        f"Reep {release}: {counts} bridged to at least {reep_load.MIN_PROVIDERS} of "
+        f"{', '.join(REEP_PROVIDERS)}, loaded in {time.monotonic() - started:.0f} s; "
+        f"release gate passed: {manifest.gate_passed}"
     )
 
 
@@ -369,7 +392,7 @@ def main() -> None:
     )
     commands.add_parser(
         "load-reep",
-        help="download, verify and load the pinned Reep release's player bridges",
+        help="download, verify and load the pinned Reep release's person and team bridges",
     )
     commands.add_parser(
         "resolve-identities",

@@ -50,8 +50,8 @@ It prints the pinned release, the releases loaded into the database, the current
 1. **Fetches the manifest** from `https://data.reep.football/releases/<tag>/manifest.json` and keeps it as `data/reep/<tag>/manifest.json`.
 2. **Downloads** `bridges.parquet` (about 376 MB, every entity type) and `redirects.parquet` (under 1 MB) from `https://data.reep.football/releases/<tag>/` into `data/reep/<tag>/`. The links on reep.football's downloads page were broken when this was written ("latest.json missing manifest_url"); the release URLs are not.
 3. **Verifies each file's SHA-256** against the manifest's `checksums_sha256`. A mismatch stops the command. Files already present with the right checksum are not downloaded again.
-4. **Keeps player bridges** for Sofascore (`player`), Transfermarkt (`spieler`) and Understat (`player`), with each Reep ID resolved through the redirects to its survivor. Only persons that Reep maps to a Sofascore player are kept, about 28k.
-5. **Loads them** into the `reference` table under the tag, replacing that tag's rows if it was loaded before, and records the manifest's gate result and diff with it.
+4. **Keeps player bridges** for Sofascore (`player`), Transfermarkt (`spieler`) and Understat (`player`), with each Reep ID resolved through the redirects to its survivor. Only persons that Reep maps to a Sofascore player are kept, about 28k. *(Replaced by ADR 34: person and team bridges of every entity bridged to at least two of the three providers, about 29k persons and 9k teams.)*
+5. **Loads them** into the `reference` tables under the tag, replacing that tag's rows if it was loaded before, and records the manifest's gate result and diff with it.
 
 `data/` is outside version control, so the files stay on the machine that ran the command. The hosted stack (M7) runs the same command against its own database.
 

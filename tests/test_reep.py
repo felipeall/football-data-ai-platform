@@ -20,17 +20,31 @@ RELEASE = "2026-01-02.1"
 PREVIOUS = "2026-01-01.1"
 
 # Person A: Sofascore 1, Transfermarkt 10, Understat 100. Person B was merged into A (a
-# redirect), and still carries A's second Transfermarkt bridge. Person C has no Sofascore
-# bridge, so it is not loaded. A team bridge and another namespace are noise.
+# redirect), and still carries A's second Transfermarkt bridge. Person C has Transfermarkt
+# and Understat bridges but no Sofascore one. Person D has two Transfermarkt bridges: one
+# provider, so it is dropped. Transfermarkt's `player` namespace is not ours.
+# Team T: Sofascore 42, Transfermarkt 11 (`verein`), and Understat 83 through U, merged into
+# T. Transfermarkt's `team` namespace is another ID space: its 42 never loads. Team V has only
+# a Sofascore bridge (and a `team`-namespace one), so it is dropped. A match bridge is noise.
 BRIDGES = [
     ("rA", "sofascore", "player", "1", "player"),
     ("rA", "transfermarkt", "spieler", "10", "player"),
     ("rB", "understat", "player", "100", "player"),
+    ("rB", "transfermarkt", "spieler", "12", "player"),
     ("rC", "transfermarkt", "spieler", "30", "player"),
-    ("rA", "transfermarkt", "verein", "11", "team"),
+    ("rC", "understat", "player", "300", "player"),
+    ("rD", "transfermarkt", "spieler", "40", "player"),
+    ("rD", "transfermarkt", "spieler", "41", "player"),
+    ("rD", "transfermarkt", "player", "42", "player"),
     ("rT", "sofascore", "team", "42", "team"),
+    ("rT", "transfermarkt", "verein", "11", "team"),
+    ("rT", "transfermarkt", "team", "42", "team"),
+    ("rU", "understat", "team", "83", "team"),
+    ("rV", "sofascore", "team", "83", "team"),
+    ("rV", "transfermarkt", "team", "7", "team"),
+    ("rT", "sofascore", "event", "5", "match"),
 ]
-REDIRECTS = [("rB", "rA")]
+REDIRECTS = [("rB", "rA"), ("rU", "rT")]
 
 
 def _write_release(directory: Path) -> dict[str, bytes]:
@@ -133,17 +147,32 @@ async def test_status_walks_back_from_the_current_release_to_the_pinned_one(
     assert not any(path.endswith(".parquet") for path in stub.requests)
 
 
-def test_only_players_with_a_sofascore_bridge_load_with_redirects_resolved(
+def _keys(bridges: list[load.Bridge]) -> list[tuple[str, str, str]]:
+    return [(reep_id, provider, external_id) for reep_id, provider, external_id, *_ in bridges]
+
+
+def test_persons_bridged_to_two_providers_load_with_redirects_resolved(tmp_path: Path) -> None:
+    _write_release(tmp_path)
+
+    assert _keys(load.bridges(tmp_path, load.PERSONS)) == [
+        ("rA", "sofascore", "1"),
+        ("rA", "transfermarkt", "10"),
+        ("rA", "transfermarkt", "12"),
+        ("rA", "understat", "100"),
+        ("rC", "transfermarkt", "30"),
+        ("rC", "understat", "300"),
+    ]
+
+
+def test_teams_bridged_to_two_providers_load_without_transfermarkt_team_ids(
     tmp_path: Path,
 ) -> None:
     _write_release(tmp_path)
 
-    bridges = load.player_bridges(tmp_path)
-
-    assert [(reep_id, provider, external_id) for reep_id, provider, external_id, *_ in bridges] == [
-        ("rA", "sofascore", "1"),
-        ("rA", "transfermarkt", "10"),
-        ("rA", "understat", "100"),
+    assert _keys(load.bridges(tmp_path, load.TEAMS)) == [
+        ("rT", "sofascore", "42"),
+        ("rT", "transfermarkt", "11"),
+        ("rT", "understat", "83"),
     ]
 
 
@@ -156,21 +185,26 @@ async def reference(connection: AsyncConnection[Any]) -> AsyncConnection[Any]:
     return connection
 
 
+def _loaded(directory: Path) -> dict[load.Entity, list[load.Bridge]]:
+    return {entity: load.bridges(directory, entity) for entity in load.ENTITIES}
+
+
 async def test_reloading_a_release_replaces_its_rows(
     reference: AsyncConnection[Any], tmp_path: Path
 ) -> None:
     files = _write_release(tmp_path)
     manifest = release.Manifest(RELEASE, _manifest(files))
-    bridges = load.player_bridges(tmp_path)
+    loaded = _loaded(tmp_path)
 
-    await load.load(reference, manifest, bridges)
-    await load.load(reference, manifest, bridges[:1])
+    await load.load(reference, manifest, loaded)
+    await load.load(reference, manifest, {entity: rows[:1] for entity, rows in loaded.items()})
 
     cursor = await reference.execute(
-        "SELECT count(*), (SELECT gate_passed FROM reference.reep_releases)"
-        " FROM reference.reep_player_bridges"
+        "SELECT (SELECT count(*) FROM reference.reep_player_bridges),"
+        " (SELECT count(*) FROM reference.reep_team_bridges),"
+        " (SELECT gate_passed FROM reference.reep_releases)"
     )
-    assert await cursor.fetchone() == (1, False)
+    assert await cursor.fetchone() == (1, 1, False)
 
 
 async def test_bridges_of_a_release_not_loaded_fail_without_retries(
@@ -182,16 +216,17 @@ async def test_bridges_of_a_release_not_loaded_fail_without_retries(
     assert error.value.non_retryable
 
 
-async def test_bridges_map_each_source_to_sofascore(
+async def test_bridges_map_each_source_to_sofascore_and_skip_persons_without_one(
     reference: AsyncConnection[Any], tmp_path: Path
 ) -> None:
     files = _write_release(tmp_path)
-    await load.load(
-        reference, release.Manifest(RELEASE, _manifest(files)), load.player_bridges(tmp_path)
-    )
+    await load.load(reference, release.Manifest(RELEASE, _manifest(files)), _loaded(tmp_path))
 
+    # Person C (Transfermarkt 30, Understat 300) is loaded, but has no Sofascore player to
+    # link to: Identity Resolution ignores it until it targets Players (ADR 34).
     assert await _reep_bridges(reference, RELEASE, "transfermarkt") == [
-        ReepBridge(10, 1, "rule", "scope")
+        ReepBridge(10, 1, "rule", "scope"),
+        ReepBridge(12, 1, "rule", "scope"),
     ]
     assert await _reep_bridges(reference, RELEASE, "understat") == [
         ReepBridge(100, 1, "rule", "scope")

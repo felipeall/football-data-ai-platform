@@ -53,7 +53,7 @@ Two reviews on #66 shaped this decision.
   - The round is not part of the ID. Only some sources have one (Sofascore's `roundInfo.round`, Transfermarkt's matchday, not Understat), and a postponed fixture can be renumbered. In a league season the pair is already unique. `marts.matches` carries `round` as a column, from whichever source has it.
   - dbt's `unique` test guards the key.
   - A second test fails if two Matches share competition, season, stage, the same two Clubs in either order, and the same kickoff date. That catches a neutral-venue match the sources record with home and away swapped.
-- **The Reep load** keeps person and team bridges only, for every provider we ingest. Only Reep entities bridged to at least two of those providers are kept: about 29k persons and 10k teams in release `2026-10-25.1`.
+- **The Reep load** keeps person and team bridges only, for every provider we ingest. Only Reep entities bridged to at least two of those providers are kept: 28,714 persons and 9,012 teams in release `2026-10-25.1`.
 - **The Transform Run (ADR 31) runs in four steps:**
   1. dbt builds staging.
   2. The identity step creates and links Clubs, from Reep, then Transfermarkt, then the stored Matches' teams.
