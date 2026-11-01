@@ -16,7 +16,7 @@ The current season (26/27) is still being played. Its squads change with every s
 - **The PoC covers one season: 25/26,** the last finished Premier League season. Neither the current season nor earlier seasons are covered.
 - **Transfermarkt squads are ingested for that season only** (`ingest-competition --season 2025`). A finished season's squads do not change, so they need no refresh.
 - **ADR 34's claim is corrected.** A past season's squad lists the players at the club when the season ended. A player who left during the season, or debuted from the academy, may have no Transfermarkt record. As ADR 34's Consequences already allow, such a player gets no Player, and each Transform Run lists them.
-- **Data already stored for 26/27 stays in `raw`.** These are Sofascore and Understat Matches. It is not deleted, and it is not ingested further while the PoC runs.
+- **Data already stored for 24/25 and 26/27 stays in `raw`.** These are Sofascore and Understat Matches. It is not deleted, and it is not ingested further while the PoC runs. `identity` anchors Players to 24/25 Source Records, so deleting them breaks those links (#74).
 
 ## Consequences
 - **The gap is measured on 25/26.**
@@ -24,4 +24,4 @@ The current season (26/27) is still being played. Its squads change with every s
   - They wait for a newer Reep release, or for a later decision that adds a Transfermarkt source listing every player who appeared, such as per-match lineups.
 - **ADR 34's baseline of 874, 604 and 270 cannot be reproduced** from the data stored today. Counts from now on use this definition: distinct Sofascore players with an Appearance in a stored 25/26 Match.
 - **Trend features across seasons (ADR 5) wait** until a second season is covered. Covering more seasons later means ingesting their squads and Matches, and adding a season costs about 560 Transfermarkt requests.
-- **The backfill and Understat commands keep their three-season defaults.** Run them with `--season` for 25/26. Restricting the defaults, and keeping 26/27 Matches out of the marts, is later work.
+- **The backfill and Understat commands keep their three-season defaults.** Run them with `--season` for 25/26. Restricting the defaults, and keeping 24/25 and 26/27 Matches out of the marts, is later work.
