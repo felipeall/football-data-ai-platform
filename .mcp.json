@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "football-docs": {
+      "command": "npx",
+      "args": ["-y", "football-docs@0.17.4"]
+    }
+  }
+}

@@ -23,5 +23,8 @@
         "repo": "dbt-labs/dbt-agent-skills"
       }
     }
-  }
+  },
+  "enabledMcpjsonServers": [
+    "football-docs"
+  ]
 }
