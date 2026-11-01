@@ -6,7 +6,7 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from football_intel.identity.activities import (
+    from football_data_ai_platform.identity.activities import (
         ClubResult,
         IdentityActivities,
         IdentityResolutionResult,

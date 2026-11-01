@@ -10,20 +10,31 @@ from psycopg import AsyncConnection
 from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.ingestion.activities import SofascoreActivities
-from football_intel.ingestion.models import BackfillInput, BackfillResult, CompleteMatchesInput
-from football_intel.ingestion.workflows import (
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.ingestion.activities import SofascoreActivities
+from football_data_ai_platform.ingestion.models import (
+    BackfillInput,
+    BackfillResult,
+    CompleteMatchesInput,
+)
+from football_data_ai_platform.ingestion.workflows import (
     BackfillWorkflow,
     MatchIngestWorkflow,
     SeasonBackfillWorkflow,
 )
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources import sofascore
-from football_intel.sources.interface import SourceInterface, SourcePolicy
-from football_intel.sources.sofascore.api import ChallengeError, UpstreamError, raise_for_failure
-from football_intel.sources.sofascore.matches import fetch_match
-from football_intel.sources.sofascore.seasons import fetch_finished_event_ids, fetch_seasons
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources import sofascore
+from football_data_ai_platform.sources.interface import SourceInterface, SourcePolicy
+from football_data_ai_platform.sources.sofascore.api import (
+    ChallengeError,
+    UpstreamError,
+    raise_for_failure,
+)
+from football_data_ai_platform.sources.sofascore.matches import fetch_match
+from football_data_ai_platform.sources.sofascore.seasons import (
+    fetch_finished_event_ids,
+    fetch_seasons,
+)
 from tests.sofascore_stub import (
     EVENT_ID,
     PLAYED,

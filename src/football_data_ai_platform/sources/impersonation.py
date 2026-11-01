@@ -14,7 +14,7 @@ from curl_cffi.requests.exceptions import ConnectionError as CurlConnectionError
 from curl_cffi.requests.exceptions import ConnectTimeout, RequestException, Timeout
 from curl_cffi.requests.session import HttpMethod
 
-from football_intel.sources.interface import SourcePolicy
+from football_data_ai_platform.sources.interface import SourcePolicy
 
 BROWSER: BrowserTypeLiteral = "chrome"
 DEFAULT_TIMEOUT_SECONDS = 30.0

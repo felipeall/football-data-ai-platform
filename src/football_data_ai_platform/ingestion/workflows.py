@@ -13,12 +13,12 @@ from temporalio.exceptions import (
 )
 
 with workflow.unsafe.imports_passed_through():
-    from football_intel.ingestion.activities import (
+    from football_data_ai_platform.ingestion.activities import (
         SofascoreActivities,
         TransfermarktActivities,
         UnderstatActivities,
     )
-    from football_intel.ingestion.models import (
+    from football_data_ai_platform.ingestion.models import (
         BackfillInput,
         BackfillResult,
         CompetitionClubsInput,
@@ -42,7 +42,7 @@ with workflow.unsafe.imports_passed_through():
         UnderstatSeasonInput,
         UnderstatSeasonResult,
     )
-    from football_intel.sources import sofascore, transfermarkt, understat
+    from football_data_ai_platform.sources import sofascore, transfermarkt, understat
 
 # Polite backoff: 10s, 20s, 40s, 80s between the five attempts. A failed attempt is retried
 # whole; Raw Responses it stored stay, as a record of what the source answered.

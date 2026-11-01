@@ -29,7 +29,7 @@ from urllib.parse import unquote, urlsplit
 import httpx
 from pydantic import SecretStr
 
-from football_intel.sources.sofascore.api import challenge_reason
+from football_data_ai_platform.sources.sofascore.api import challenge_reason
 
 logger = logging.getLogger(__name__)
 

@@ -1,5 +1,5 @@
 [project]
-name = "football-intel"
+name = "football-data-ai-platform"
 version = "0.1.0"
 description = "Durable football data ingestion with Temporal, and an AI scouting agent on top."
 readme = "README.md"
@@ -22,7 +22,7 @@ dependencies = [
 ]
 
 [project.scripts]
-football-intel = "football_intel.ingestion.cli:main"
+fdap = "football_data_ai_platform.ingestion.cli:main"
 
 [dependency-groups]
 dev = [
@@ -58,13 +58,13 @@ asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 
 [tool.importlinter]
-root_package = "football_intel"
+root_package = "football_data_ai_platform"
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Provider SDKs only inside agent.providers.<provider> (ADR 24)"
 type = "forbidden"
-source_modules = ["football_intel"]
+source_modules = ["football_data_ai_platform"]
 forbidden_modules = [
     "anthropic",
     "cohere",
@@ -75,35 +75,35 @@ forbidden_modules = [
 ]
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
-    "football_intel.agent.providers.anthropic -> anthropic",
-    "football_intel.agent.providers.anthropic.** -> anthropic",
+    "football_data_ai_platform.agent.providers.anthropic -> anthropic",
+    "football_data_ai_platform.agent.providers.anthropic.** -> anthropic",
 ]
 
 [[tool.importlinter.contracts]]
 name = "Raw Response recording is source-neutral"
 type = "forbidden"
-source_modules = ["football_intel.sources.recording"]
+source_modules = ["football_data_ai_platform.sources.recording"]
 forbidden_modules = [
-    "football_intel.sources.sofascore",
-    "football_intel.sources.transfermarkt",
+    "football_data_ai_platform.sources.sofascore",
+    "football_data_ai_platform.sources.transfermarkt",
     "transfermarkt_api",
 ]
 
 [[tool.importlinter.contracts]]
 name = "curl_cffi only behind the impersonating transport (ADR 14)"
 type = "forbidden"
-source_modules = ["football_intel"]
+source_modules = ["football_data_ai_platform"]
 forbidden_modules = ["curl_cffi"]
 unmatched_ignore_imports_alerting = "none"
-ignore_imports = ["football_intel.sources.impersonation -> curl_cffi"]
+ignore_imports = ["football_data_ai_platform.sources.impersonation -> curl_cffi"]
 
 [[tool.importlinter.contracts]]
 name = "camoufox only in Sofascore's Token Provider (ADR 30)"
 type = "forbidden"
-source_modules = ["football_intel"]
+source_modules = ["football_data_ai_platform"]
 forbidden_modules = ["camoufox", "playwright"]
 unmatched_ignore_imports_alerting = "none"
 ignore_imports = [
-    "football_intel.sources.sofascore.captcha -> camoufox",
-    "football_intel.sources.sofascore.captcha -> playwright",
+    "football_data_ai_platform.sources.sofascore.captcha -> camoufox",
+    "football_data_ai_platform.sources.sofascore.captcha -> playwright",
 ]

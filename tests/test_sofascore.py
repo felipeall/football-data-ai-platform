@@ -12,16 +12,20 @@ from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.ingestion.activities import SofascoreActivities
-from football_intel.ingestion.models import MatchIngestInput, MatchIngestResult
-from football_intel.ingestion.workflows import MatchIngestWorkflow
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources import sofascore
-from football_intel.sources.interface import CircuitOpenError, SourceInterface, SourcePolicy
-from football_intel.sources.recording import RawResponseMissingError
-from football_intel.sources.sofascore.api import UpstreamError
-from football_intel.sources.sofascore.matches import fetch_match
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.ingestion.activities import SofascoreActivities
+from football_data_ai_platform.ingestion.models import MatchIngestInput, MatchIngestResult
+from football_data_ai_platform.ingestion.workflows import MatchIngestWorkflow
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources import sofascore
+from football_data_ai_platform.sources.interface import (
+    CircuitOpenError,
+    SourceInterface,
+    SourcePolicy,
+)
+from football_data_ai_platform.sources.recording import RawResponseMissingError
+from football_data_ai_platform.sources.sofascore.api import UpstreamError
+from football_data_ai_platform.sources.sofascore.matches import fetch_match
 from tests.sofascore_stub import (
     BENCHED,
     EVENT_ID,

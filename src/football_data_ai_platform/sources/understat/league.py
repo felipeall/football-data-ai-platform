@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from football_intel.sources.understat.api import client, raise_for_failure
+from football_data_ai_platform.sources.understat.api import client, raise_for_failure
 
 PREMIER_LEAGUE = "EPL"  # Understat's league name
 

@@ -1,6 +1,6 @@
 # 36. Repository renamed to football-data-ai-platform; internal names stay
 
-Status: Accepted — 2026-11-01. Supersedes the repository name in ADR 2.
+Status: Accepted — 2026-11-01. Supersedes the repository name in ADR 2. Internal names amended by ADR 37.
 
 ## Context
 ADR 2 started a fresh repository named `football-intel`. The name says little about what the project is to someone who finds it on GitHub. The v1 repository, `football-data-platform`, was still unarchived, although ADR 2 decided to archive it.

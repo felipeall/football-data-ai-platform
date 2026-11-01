@@ -10,11 +10,14 @@ from temporalio.exceptions import ActivityError, ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.ingestion.activities import TransfermarktActivities
-from football_intel.ingestion.models import SquadIngestInput, SquadIngestResult
-from football_intel.ingestion.workflows import TRANSFERMARKT_RETRY_POLICY, SquadIngestWorkflow
-from football_intel.sources.interface import SourceInterface, SourcePolicy
-from football_intel.sources.transfermarkt import SOURCE, is_upstream_failure
+from football_data_ai_platform.ingestion.activities import TransfermarktActivities
+from football_data_ai_platform.ingestion.models import SquadIngestInput, SquadIngestResult
+from football_data_ai_platform.ingestion.workflows import (
+    TRANSFERMARKT_RETRY_POLICY,
+    SquadIngestWorkflow,
+)
+from football_data_ai_platform.sources.interface import SourceInterface, SourcePolicy
+from football_data_ai_platform.sources.transfermarkt import SOURCE, is_upstream_failure
 from tests.transfermarkt_stub import CLUB_ID, PLAYER_IDS, SEASON_ID, TransfermarktStub
 
 

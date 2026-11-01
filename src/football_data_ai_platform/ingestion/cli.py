@@ -11,11 +11,11 @@ import httpx
 from psycopg import AsyncConnection
 from temporalio.client import Client
 
-from football_intel.config import Settings
-from football_intel.fetch_attempts import FetchAttemptStore, SuccessRate
-from football_intel.identity.store import ClubStore, ClubTaken
-from football_intel.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
-from football_intel.ingestion.models import (
+from football_data_ai_platform.config import Settings
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore, SuccessRate
+from football_data_ai_platform.identity.store import ClubStore, ClubTaken
+from football_data_ai_platform.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
+from football_data_ai_platform.ingestion.models import (
     BackfillInput,
     CompetitionSquadsInput,
     MatchIngestInput,
@@ -23,24 +23,28 @@ from football_intel.ingestion.models import (
     SquadIngestResult,
     UnderstatIngestInput,
 )
-from football_intel.ingestion.schedules import (
+from football_data_ai_platform.ingestion.schedules import (
     POST_MATCH_SCHEDULE_ID,
     UNDERSTAT_SCHEDULE_ID,
     ensure_post_match_schedule,
     ensure_understat_schedule,
 )
-from football_intel.ingestion.workflows import (
+from football_data_ai_platform.ingestion.workflows import (
     BackfillWorkflow,
     CompetitionSquadsWorkflow,
     MatchIngestWorkflow,
     SquadIngestWorkflow,
     UnderstatIngestWorkflow,
 )
-from football_intel.reep import load as reep_load
-from football_intel.reep import release as reep_release
-from football_intel.sources.sofascore.seasons import PREMIER_LEAGUE as SOFASCORE_PREMIER_LEAGUE
-from football_intel.sources.transfermarkt.competitions import PREMIER_LEAGUE
-from football_intel.sources.understat.league import PREMIER_LEAGUE as UNDERSTAT_PREMIER_LEAGUE
+from football_data_ai_platform.reep import load as reep_load
+from football_data_ai_platform.reep import release as reep_release
+from football_data_ai_platform.sources.sofascore.seasons import (
+    PREMIER_LEAGUE as SOFASCORE_PREMIER_LEAGUE,
+)
+from football_data_ai_platform.sources.transfermarkt.competitions import PREMIER_LEAGUE
+from football_data_ai_platform.sources.understat.league import (
+    PREMIER_LEAGUE as UNDERSTAT_PREMIER_LEAGUE,
+)
 
 
 async def _client(settings: Settings) -> Client:
@@ -275,7 +279,7 @@ async def reep_status(settings: Settings) -> None:
             flush=True,
         )
     if not loaded:
-        print("Loaded: none; run `football-intel load-reep`", flush=True)
+        print("Loaded: none; run `fdap load-reep`", flush=True)
     try:
         async with reep_release.client() as api:
             newer = await reep_release.releases_since(api, pinned)
@@ -386,7 +390,7 @@ async def success_rates(settings: Settings, first_day: date, last_day: date) -> 
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(prog="football-intel")
+    parser = argparse.ArgumentParser(prog="fdap")
     commands = parser.add_subparsers(dest="command", required=True)
     refresh_help = "fetch from the source even if fresh data is stored"
 

@@ -6,15 +6,15 @@ import logging
 from temporalio.client import Client
 from temporalio.worker import Worker
 
-from football_intel.config import Settings
-from football_intel.identity.activities import IdentityActivities
-from football_intel.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
-from football_intel.ingestion.activities import (
+from football_data_ai_platform.config import Settings
+from football_data_ai_platform.identity.activities import IdentityActivities
+from football_data_ai_platform.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
+from football_data_ai_platform.ingestion.activities import (
     SofascoreActivities,
     TransfermarktActivities,
     UnderstatActivities,
 )
-from football_intel.ingestion.workflows import (
+from football_data_ai_platform.ingestion.workflows import (
     BackfillWorkflow,
     CompetitionSquadsWorkflow,
     FixturesWorkflow,
@@ -24,15 +24,15 @@ from football_intel.ingestion.workflows import (
     SquadIngestWorkflow,
     UnderstatIngestWorkflow,
 )
-from football_intel.sources import sofascore, understat
-from football_intel.sources.impersonation import impersonating_backend
-from football_intel.sources.interface import SourceInterface
-from football_intel.sources.sofascore.captcha import (
+from football_data_ai_platform.sources import sofascore, understat
+from football_data_ai_platform.sources.impersonation import impersonating_backend
+from football_data_ai_platform.sources.interface import SourceInterface
+from football_data_ai_platform.sources.sofascore.captcha import (
     CaptchaTransport,
     TokenProvider,
     camoufox_solver,
 )
-from football_intel.sources.transfermarkt import SOURCE, is_upstream_failure
+from football_data_ai_platform.sources.transfermarkt import SOURCE, is_upstream_failure
 
 
 async def run_worker(settings: Settings) -> None:

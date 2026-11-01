@@ -1,6 +1,6 @@
 {{ config(severity='warn') }}
 -- Staged Matches whose Competition or a team has no link, so `marts.matches` leaves them out
--- (ADR 34). `football-intel create-clubs` lists why each team has no Club.
+-- (ADR 34). `fdap create-clubs` lists why each team has no Club.
 with links as (
     select provider, external_id from {{ source('identity', 'club_links') }}
 ),

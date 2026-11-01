@@ -4,9 +4,9 @@ from datetime import timedelta
 
 import httpx
 
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources.recording import RecordingTransport, ReplayTransport
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources.recording import RecordingTransport, ReplayTransport
 
 SOURCE = "transfermarkt"
 

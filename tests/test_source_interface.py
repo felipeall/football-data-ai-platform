@@ -12,14 +12,22 @@ from pydantic import SecretStr
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from football_intel.config import Settings
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.ingestion.activities import TransfermarktActivities
-from football_intel.ingestion.models import SquadIngestInput
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources.interface import CircuitOpenError, SourceInterface, SourcePolicy
-from football_intel.sources.transfermarkt import SOURCE, is_upstream_failure, recording_transport
-from football_intel.sources.transfermarkt.squads import fetch_squad
+from football_data_ai_platform.config import Settings
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.ingestion.activities import TransfermarktActivities
+from football_data_ai_platform.ingestion.models import SquadIngestInput
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources.interface import (
+    CircuitOpenError,
+    SourceInterface,
+    SourcePolicy,
+)
+from football_data_ai_platform.sources.transfermarkt import (
+    SOURCE,
+    is_upstream_failure,
+    recording_transport,
+)
+from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
 from tests.transfermarkt_stub import CLUB_ID, PLAYER_IDS, SEASON_ID, TransfermarktStub
 
 

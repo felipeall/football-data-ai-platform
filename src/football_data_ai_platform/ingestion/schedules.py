@@ -15,10 +15,12 @@ from temporalio.client import (
     ScheduleUpdateInput,
 )
 
-from football_intel.ingestion.models import FixturesInput, UnderstatIngestInput
-from football_intel.ingestion.workflows import FixturesWorkflow, UnderstatIngestWorkflow
-from football_intel.sources.sofascore.seasons import PREMIER_LEAGUE
-from football_intel.sources.understat.league import PREMIER_LEAGUE as UNDERSTAT_PREMIER_LEAGUE
+from football_data_ai_platform.ingestion.models import FixturesInput, UnderstatIngestInput
+from football_data_ai_platform.ingestion.workflows import FixturesWorkflow, UnderstatIngestWorkflow
+from football_data_ai_platform.sources.sofascore.seasons import PREMIER_LEAGUE
+from football_data_ai_platform.sources.understat.league import (
+    PREMIER_LEAGUE as UNDERSTAT_PREMIER_LEAGUE,
+)
 
 POST_MATCH_SCHEDULE_ID = "post-match-fixtures"
 RUN_AT_HOUR_UTC = 6

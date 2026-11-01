@@ -8,8 +8,12 @@ import logging
 import httpx
 import pytest
 
-from football_intel.sources.sofascore.api import ChallengeError, client, raise_for_failure
-from football_intel.sources.sofascore.captcha import (
+from football_data_ai_platform.sources.sofascore.api import (
+    ChallengeError,
+    client,
+    raise_for_failure,
+)
+from football_data_ai_platform.sources.sofascore.captcha import (
     BACKOFF_SECONDS,
     EXCHANGE_URL,
     EXPIRY_MARGIN_SECONDS,
@@ -230,7 +234,9 @@ async def test_a_failed_exchange_backs_off_like_a_failed_solve() -> None:
 async def test_an_attempt_that_hangs_times_out_and_backs_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("football_intel.sources.sofascore.captcha.OBTAIN_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(
+        "football_data_ai_platform.sources.sofascore.captcha.OBTAIN_TIMEOUT_SECONDS", 0.05
+    )
     clock, browser = Clock(), Browser()
     browser.gate = asyncio.Event()  # never set: the solve hangs
     transport = _transport(Sofascore(clock), TokenProvider(browser.solve, clock))

@@ -8,11 +8,17 @@ from psycopg import AsyncConnection
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.ingestion.activities import TransfermarktActivities
-from football_intel.ingestion.models import CompetitionSquadsInput, CompetitionSquadsResult
-from football_intel.ingestion.workflows import CompetitionSquadsWorkflow, SquadIngestWorkflow
-from football_intel.sources.interface import SourceInterface, SourcePolicy
-from football_intel.sources.transfermarkt import SOURCE, is_upstream_failure
+from football_data_ai_platform.ingestion.activities import TransfermarktActivities
+from football_data_ai_platform.ingestion.models import (
+    CompetitionSquadsInput,
+    CompetitionSquadsResult,
+)
+from football_data_ai_platform.ingestion.workflows import (
+    CompetitionSquadsWorkflow,
+    SquadIngestWorkflow,
+)
+from football_data_ai_platform.sources.interface import SourceInterface, SourcePolicy
+from football_data_ai_platform.sources.transfermarkt import SOURCE, is_upstream_failure
 from tests.transfermarkt_stub import (
     COMPETITION_CLUB_IDS,
     COMPETITION_ID,

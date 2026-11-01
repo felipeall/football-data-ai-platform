@@ -9,7 +9,7 @@ from alembic.config import Config
 from psycopg import AsyncConnection, sql
 from temporalio.testing import WorkflowEnvironment
 
-from football_intel.config import Settings
+from football_data_ai_platform.config import Settings
 
 
 @pytest.fixture(scope="session")
