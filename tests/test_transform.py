@@ -97,12 +97,43 @@ async def test_a_second_start_joins_the_running_run(temporal: WorkflowEnvironmen
             await asyncio.sleep(0.05)
         second = await start_transform(temporal.client, task_queue)
         stubs.release.set()
-        await second.result()
+        await second.handle.result()
 
-    assert first.id == second.id == TRANSFORM_WORKFLOW_ID
-    assert second.result_run_id == first.result_run_id
-    assert (await first.describe()).status == WorkflowExecutionStatus.COMPLETED
+    run_id = first.handle.result_run_id
+    assert first.handle.id == second.handle.id == TRANSFORM_WORKFLOW_ID
+    assert second.handle.result_run_id == run_id
+    assert (await first.handle.describe()).status == WorkflowExecutionStatus.COMPLETED
     assert [call[0] for call in stubs.calls].count("create_clubs") == 1
+
+    assert first.message(task_queue) == f"Started Transform Run {run_id}; waiting for it to finish"
+    started = (await first.handle.describe()).start_time
+    assert second.start_time == started
+    assert second.message(task_queue) == (
+        f"Joined Transform Run {run_id}, started {started:%Y-%m-%d %H:%M:%S} UTC;"
+        " waiting for it to finish"
+    )
+
+
+async def test_joining_a_run_on_another_queue_says_whose_it_is(
+    temporal: WorkflowEnvironment,
+) -> None:
+    stubs = Stubs()
+    stubs.release.clear()
+    live_queue, own_queue = f"live-{uuid.uuid4()}", f"wt-{uuid.uuid4()}"
+    async with stubs.worker(temporal, live_queue):
+        await start_transform(temporal.client, live_queue)
+        while not stubs.calls:
+            await asyncio.sleep(0.05)
+        joined = await start_transform(temporal.client, own_queue)
+        stubs.release.set()
+        await joined.handle.result()
+
+    assert joined.joined
+    assert joined.task_queue == live_queue
+    assert joined.message(own_queue).splitlines()[1] == (
+        f"It runs on queue {live_queue}, not yours ({own_queue}):"
+        " it writes to that worker's database"
+    )
 
 
 async def test_an_unlinked_team_or_player_never_fails_the_run(
