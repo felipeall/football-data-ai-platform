@@ -186,6 +186,15 @@ async def resolve_identities(settings: Settings) -> None:
     )
     for count in result.candidates:
         print(f"  {count.source:<13} {count.method:<20} {count.status:<9} {count.count:>5}")
+    if result.reep_conflicts:
+        print(
+            f"{len(result.reep_conflicts)} Reep persons link to several Players; Reep linked"
+            " none of their records. Reject the wrong links:"
+        )
+    for conflict in result.reep_conflicts:
+        records = ", ".join(f"{source} {record}" for source, record in conflict.records)
+        players = ", ".join(map(str, conflict.player_ids))
+        print(f"  {conflict.reep_id}: Players {players}, through {records}")
     for source in ("sofascore", "understat"):
         unlinked = [r for r in result.unlinked if r.source == source]
         played = sum(1 for r in unlinked if r.minutes > 0)

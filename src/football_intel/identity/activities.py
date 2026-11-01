@@ -17,7 +17,9 @@ from football_intel.identity.rules import (
     Proposal,
     RecordKey,
     ReepBridge,
+    ReepConflict,
     SourcePlayer,
+    reep_conflicts,
     reep_proposals,
     sofascore_proposals,
     transfermarkt_players,
@@ -53,6 +55,7 @@ class IdentityResolutionResult:
     # Every Candidate in the schema after the run, not only this run's.
     candidates: list[CandidateCount]
     unlinked: list[UnlinkedRecord]
+    reep_conflicts: list[ReepConflict]
 
 
 @dataclass(frozen=True)
@@ -183,6 +186,14 @@ class IdentityActivities:
             )
             for source, player, pending in resolution.unlinked
         ]
+        for conflict in resolution.reep_conflicts:
+            activity.logger.warning(
+                "Reep person %s links to several Players (%s) through %s; Reep linked none of"
+                " its records",
+                conflict.reep_id,
+                ", ".join(map(str, conflict.player_ids)),
+                ", ".join(f"{source} {record}" for source, record in conflict.records),
+            )
         activity.logger.info(
             "Identity Resolution: %d Players created, %d Candidates stored, %d records unlinked",
             resolution.players_created,
@@ -195,6 +206,7 @@ class IdentityActivities:
             resolution.candidates_stored,
             counts,
             unlinked,
+            resolution.reep_conflicts,
         )
 
 
@@ -225,6 +237,8 @@ class Resolution:
     unlinked: list[tuple[str, SourcePlayer, bool]] = field(
         default_factory=list[tuple[str, SourcePlayer, bool]]
     )
+    # Reep persons whose records already link to several Players; Reep linked none of them.
+    reep_conflicts: list[ReepConflict] = field(default_factory=list[ReepConflict])
 
 
 async def resolve(
@@ -253,11 +267,13 @@ async def resolve(
         return _by_source(await store.links())
 
     if reep_release is not None and bridges is not None:
+        ours = {source: {p.source_record_id for p in ps} for source, ps in held.items()}
+        resolution.reep_conflicts = reep_conflicts(bridges, ours, await store.links())
         await propose(
             reep_proposals(
                 reep_release,
                 bridges,
-                {source: {p.source_record_id for p in ps} for source, ps in held.items()},
+                ours,
                 await store.proposed(reopen_rejected_reep=False),
                 await store.links(),
                 {

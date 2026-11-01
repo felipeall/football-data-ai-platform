@@ -121,24 +121,13 @@ def reep_proposals(
 
     - A record that has a Candidate (`proposed`) is skipped, a rejected one included, so
       rejecting a Reep link never makes Reep create a Player for it again.
-    - A record bridged to several Reep persons, or a person whose records already link to
-      several Players, is left to the rules.
+    - A record bridged to several Reep persons is left to the rules. A person whose records
+      already link to several Players is left alone, and listed by `reep_conflicts`.
     - A Transfermarkt or Understat link our data contradicts is pending, not accepted: its
       birth date is more than a day off the Player's Sofascore record, or it never played in
       the same Match for the same Club as that record.
     """
-    ours = sorted(
-        (b for b in bridges if b.source_record_id in held.get(b.source, ())),
-        key=lambda b: (b.reep_id, b.source, b.source_record_id),
-    )
-    persons_of: dict[RecordKey, set[str]] = defaultdict(set)
-    for bridge in ours:
-        persons_of[bridge.source, bridge.source_record_id].add(bridge.reep_id)
-    persons: dict[str, list[ReepBridge]] = defaultdict(list)
-    for bridge in ours:
-        if len(persons_of[bridge.source, bridge.source_record_id]) == 1:
-            persons[bridge.reep_id].append(bridge)
-
+    persons = _persons(bridges, held)
     sofascore_of = {
         player: record for (source, record), player in links.items() if source == SOFASCORE
     }
@@ -176,6 +165,50 @@ def reep_proposals(
                 )
             )
     return proposals
+
+
+@dataclass(frozen=True)
+class ReepConflict:
+    """A Reep person whose held records already link to several Players: Reep says they are
+    one person, our links say they are several. Reep links none of its records; a person
+    decides, by rejecting the wrong links."""
+
+    reep_id: str
+    player_ids: list[int]
+    records: list[RecordKey]
+
+
+def reep_conflicts(
+    bridges: Iterable[ReepBridge], held: Mapping[str, set[int]], links: Mapping[RecordKey, int]
+) -> list[ReepConflict]:
+    """The Reep persons `reep_proposals` leaves alone because their records link to several
+    Players. Only a later run can find one, since a fresh run has no links yet."""
+    conflicts: list[ReepConflict] = []
+    for reep_id, members in _persons(bridges, held).items():
+        keys = [(m.source, m.source_record_id) for m in members]
+        players = sorted({links[key] for key in keys if key in links})
+        if len(players) > 1:
+            conflicts.append(ReepConflict(reep_id, players, [k for k in keys if k in links]))
+    return conflicts
+
+
+def _persons(
+    bridges: Iterable[ReepBridge], held: Mapping[str, set[int]]
+) -> dict[str, list[ReepBridge]]:
+    """Each Reep person's bridges to records we hold, in Reep ID order. A record bridged to
+    several persons is left out: the rules decide it."""
+    ours = sorted(
+        (b for b in bridges if b.source_record_id in held.get(b.source, ())),
+        key=lambda b: (b.reep_id, b.source, b.source_record_id),
+    )
+    persons_of: dict[RecordKey, set[str]] = defaultdict(set)
+    for bridge in ours:
+        persons_of[bridge.source, bridge.source_record_id].add(bridge.reep_id)
+    persons: dict[str, list[ReepBridge]] = defaultdict(list)
+    for bridge in ours:
+        if len(persons_of[bridge.source, bridge.source_record_id]) == 1:
+            persons[bridge.reep_id].append(bridge)
+    return persons
 
 
 def _played(appearances: Iterable[Appearance]) -> dict[int, set[tuple[str, str]]]:

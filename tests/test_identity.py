@@ -17,6 +17,7 @@ from football_intel.identity.rules import (
     Method,
     Proposal,
     ReepBridge,
+    ReepConflict,
     SourcePlayer,
     sofascore_proposals,
     understat_proposals,
@@ -313,6 +314,23 @@ async def test_a_reep_bridge_links_a_new_record_to_the_player_of_a_linked_one(
         ("sofascore", "1", 1, "reep_bridge", "accepted"),
         ("transfermarkt", "10", 1, "reep_bridge", "accepted"),
     ]
+
+
+async def test_a_reep_person_whose_records_link_to_two_players_is_listed_not_linked(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    # Without Reep, Sofascore 1 and Transfermarkt 10 link to Transfermarkt 10's Player, and
+    # Transfermarkt 11 gets its own. A later release says 10 and 11 are one person.
+    await resolve(identity, WORLD, None, None)
+    first = await _candidates(connection)
+    bridges = [ReepBridge("rA", "transfermarkt", 10), ReepBridge("rA", "transfermarkt", 11)]
+
+    resolution = await resolve(identity, WORLD, RELEASE, bridges)
+
+    assert resolution.reep_conflicts == [
+        ReepConflict("rA", [1, 2], [("transfermarkt", 10), ("transfermarkt", 11)])
+    ]
+    assert await _candidates(connection) == first
 
 
 async def test_a_rerun_creates_no_players_and_changes_no_ids(
