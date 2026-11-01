@@ -26,7 +26,11 @@ from football_data_ai_platform.sources import sofascore, transfermarkt, understa
 from football_data_ai_platform.sources.sofascore.matches import MatchNotFinished, fetch_match
 from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
 from football_data_ai_platform.sources.understat import league as understat_league
-from football_data_ai_platform.transform.dbt import DbtActivities
+from football_data_ai_platform.transform.dbt import (
+    CONNECTION_ERRORS,
+    DbtActivities,
+    lost_connection,
+)
 from football_data_ai_platform.transform.workflows import (
     CLUBS_AND_MATCHES,
     STAGING,
@@ -574,3 +578,72 @@ async def test_a_failed_dbt_test_fails_the_build_without_retries(
 
     assert failure.value.non_retryable
     assert "assert_identity_candidates_have_staged_source_records" in failure.value.message
+
+
+async def test_a_build_that_lost_its_database_connection_is_retried(
+    connection: AsyncConnection[Any], database_url: str
+) -> None:
+    dbt = DbtActivities(database_url, DBT_PROJECT)
+    await _store_matches(connection)
+    # Reading the Raw Responses ends the reader's own connection, as a Postgres restart would.
+    await connection.execute("ALTER TABLE raw.raw_responses RENAME TO raw_responses_kept")
+    await connection.execute(
+        "CREATE VIEW raw.raw_responses AS SELECT r.* FROM raw.raw_responses_kept r"
+        " WHERE pg_terminate_backend(pg_backend_pid())"
+    )
+    try:
+        with pytest.raises(ApplicationError) as failure:
+            await ActivityEnvironment().run(dbt.build_dbt, STAGING)
+    finally:
+        # With the staging views dbt built on it; the next build recreates them.
+        await connection.execute("DROP VIEW raw.raw_responses CASCADE")
+        await connection.execute("ALTER TABLE raw.raw_responses_kept RENAME TO raw_responses")
+
+    assert "exited 1" in failure.value.message, failure.value.message
+    assert not failure.value.non_retryable, failure.value.message
+    assert "server closed the connection unexpectedly" in failure.value.message
+
+
+def _results(*failures: tuple[str, str]) -> dict[str, Any]:
+    """A `run_results.json` with one passing model and `failures`, each (status, message)."""
+    results: list[dict[str, Any]] = [
+        {"unique_id": "model.x.passed", "status": "success", "message": "SELECT 1"}
+    ]
+    results += [
+        {"unique_id": f"node.x.failed_{n}", "status": status, "message": message}
+        for n, (status, message) in enumerate(failures)
+    ]
+    results.append({"unique_id": "model.x.skipped", "status": "skipped", "message": None})
+    return {"metadata": {"invocation_id": "x"}, "results": results}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        *CONNECTION_ERRORS,
+        'connection to server at "postgres" (172.18.0.2), port 5432 failed: Connection refused',
+    ],
+)
+def test_a_lost_connection_may_pass_when_run_again(error: str) -> None:
+    message = f"Database Error in model staging_x (models/staging_x.sql)\n  {error}\n"
+    assert lost_connection(_results(("error", message), ("error", message)))
+
+
+@pytest.mark.parametrize(
+    "run_results",
+    [
+        None,  # dbt wrote no results
+        _results(),  # nothing failed
+        _results(("error", 'Database Error\n  relation "raw.raw_responses" does not exist')),
+        _results(("fail", "Got 3 results, configured to fail if != 0")),
+        # A real failure next to a lost connection fails the same way again.
+        _results(
+            ("error", "Database Error\n  server closed the connection unexpectedly"),
+            ("fail", "Got 3 results, configured to fail if != 0"),
+        ),
+        # A test whose failing rows mention a lost connection is still a failing test.
+        _results(("fail", "server closed the connection unexpectedly")),
+    ],
+)
+def test_any_other_failure_would_fail_again(run_results: dict[str, Any] | None) -> None:
+    assert not lost_connection(run_results)

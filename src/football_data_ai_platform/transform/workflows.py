@@ -82,7 +82,8 @@ class TransformWorkflow:
         return TransformResult(staging, clubs, clubs_and_matches, identity, the_rest, times)
 
 
-_RETRY = RetryPolicy(maximum_attempts=3)
+# Retries 10 s, then 20 s, later: time for a restarting Postgres to come back.
+_RETRY = RetryPolicy(initial_interval=timedelta(seconds=10), maximum_attempts=3)
 
 
 async def _build_dbt(selection: list[str]) -> DbtBuildResult:
