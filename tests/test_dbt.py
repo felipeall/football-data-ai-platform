@@ -49,7 +49,8 @@ COVERED_SEASON = 2024
 def _dbt_build(
     database_url: str, tmp_path: Path, *selection: str, succeeds: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    """`dbt build` against the test database, as a subprocess, as it runs from the CLI."""
+    """`dbt build` against the test database, as a subprocess, as the Transform Run runs it:
+    a test runs only once all its parents are selected."""
     conninfo = conninfo_to_dict(database_url)
     env = os.environ | {
         "POSTGRES_HOST": str(conninfo["host"]),
@@ -62,7 +63,7 @@ def _dbt_build(
     args = ["--no-use-colors", "--project-dir", DBT_PROJECT, "--profiles-dir", DBT_PROJECT]
     paths = ["--target-path", tmp_path / "target", "--log-path", tmp_path / "logs"]
     result = subprocess.run(
-        [dbt, "build", *args, *paths, *selection],
+        [dbt, "build", *args, *paths, "--indirect-selection", "cautious", *selection],
         env=env,
         capture_output=True,
         text=True,
@@ -92,7 +93,7 @@ async def _store_matches(connection: AsyncConnection[Any]) -> None:
     )
 
 
-async def test_dbt_builds_matches_appearances_and_season_minutes(
+async def test_dbt_builds_sofascore_matches_and_appearances(
     connection: AsyncConnection[Any], database_url: str, tmp_path: Path
 ) -> None:
     await _store_matches(connection)
@@ -114,16 +115,6 @@ async def test_dbt_builds_matches_appearances_and_season_minutes(
     )
     # The unused substitute has no minutes, so no Appearance. Home players take the home team.
     assert await cursor.fetchall() == [(11, 42), (12, 42), (21, 38), (22, 38)]
-    cursor = await connection.execute(
-        "SELECT player_id, season_year, appearances, minutes_played"
-        " FROM marts.player_season_minutes ORDER BY player_id"
-    )
-    assert await cursor.fetchall() == [
-        (11, "24/25", 2, 180),
-        (12, "24/25", 2, 180),
-        (21, "24/25", 2, 180),
-        (22, "24/25", 2, 8),
-    ]
 
 
 async def test_dbt_builds_understat_matches_appearances_and_shots(
@@ -159,10 +150,13 @@ async def test_dbt_builds_understat_matches_appearances_and_shots(
         (1, 804, CHELSEA, "away", 15),
     ]
     cursor = await connection.execute(
-        "SELECT match_id, player_id, side, x, y, xg FROM staging.stg_understat__shots"
+        "SELECT match_id, player_id, side, result, x, y, xg, assisted_by_player_id"
+        " FROM staging.stg_understat__shots ORDER BY shot_id"
     )
+    # The assister is named only; the shooting team's roster gives their ID.
     assert await cursor.fetchall() == [
-        (1, 801, "home", Decimal("0.9"), Decimal("0.5"), Decimal("0.25"))
+        (1, 801, "home", "Goal", Decimal("0.9"), Decimal("0.5"), Decimal("0.25"), 802),
+        (1, 803, "away", "OwnGoal", Decimal("0.03"), Decimal("0.5"), Decimal("0.25"), None),
     ]
 
 
@@ -242,18 +236,26 @@ async def _kick_off(connection: AsyncConnection[Any], event_id: int, at: str) ->
     )
 
 
-async def _store_both_sources(connection: AsyncConnection[Any], *event_ids: int) -> None:
+async def _store_both_sources(
+    connection: AsyncConnection[Any], *event_ids: int, per_player: bool = False
+) -> None:
+    """Sofascore's `event_ids`, and Understat's 24/25 league data. `per_player` adds
+    Sofascore's rating breakdowns and Understat's Match data."""
     stub = SofascoreStub()
     recording = sofascore.recording_transport(
         stub.transport(), RawResponseStore(connection), FetchAttemptStore(connection)
     )
     for event_id in event_ids:
-        await fetch_match(recording, event_id, per_player=False)
+        await fetch_match(recording, event_id, per_player=per_player)
         await _kick_off(connection, event_id, KICKOFFS[event_id])
     recording = understat.recording_transport(
         UnderstatStub().transport(), RawResponseStore(connection), FetchAttemptStore(connection)
     )
-    await understat_league.fetch_league_season(recording, LEAGUE, 2024)
+    season = await understat_league.fetch_league_season(recording, LEAGUE, 2024)
+    if per_player:
+        for match_id in season.finished_match_ids:
+            with suppress(understat_league.MatchDataMissing):
+                await understat_league.fetch_match(recording, match_id)
 
 
 async def test_dbt_links_matches_across_sources_by_competition_season_and_clubs(
@@ -296,6 +298,152 @@ async def test_dbt_links_matches_across_sources_by_competition_season_and_clubs(
     assert (again.created, again.links_added, again.clubs) == ([], 0, 2)
 
 
+async def _link(connection: AsyncConnection[Any], *records: tuple[str, int]) -> int:
+    """A new Player, with an accepted link from each of `records` (source, source ID)."""
+    cursor = await connection.execute(
+        "INSERT INTO identity.players DEFAULT VALUES RETURNING player_id"
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    for source, source_record_id in records:
+        await connection.execute(
+            "INSERT INTO identity.identity_candidates"
+            " (source, source_record_id, player_id, method, confidence, status)"
+            " VALUES (%s, %s, %s, 'test', 1, 'accepted')",
+            (source, str(source_record_id), row[0]),
+        )
+    return row[0]
+
+
+# The stubs' Matches are in 24/25; the Player marts hold the covered Seasons only.
+COVER_2024 = ["--vars", "{covered_seasons: [2024]}"]
+ARSENAL_CHELSEA = "premier-league:2024:league:arsenal:chelsea"
+CHELSEA_ARSENAL = "premier-league:2024:league:chelsea:arsenal"
+
+
+async def test_dbt_builds_the_player_marts_from_linked_source_records(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    # Sofascore 1001 is Understat 1; Understat has no data for 1003's fixture (Match 2).
+    await _store_both_sources(connection, 1001, 1003, per_player=True)
+    await fetch_squad(
+        transfermarkt.recording_transport(
+            TransfermarktStub().transport(),
+            RawResponseStore(connection),
+            FetchAttemptStore(connection),
+        ),
+        CLUB_ID,
+        SEASON_ID,
+    )
+    await _create_clubs(connection, database_url, tmp_path)
+    # Sofascore 12 and 22, and Understat 803 and 804, link to no Player.
+    linked = await _link(connection, ("sofascore", 11), ("understat", 801), ("transfermarkt", 102))
+    sofascore_only = await _link(connection, ("sofascore", 21))
+    understat_only = await _link(connection, ("understat", 802))
+
+    build = _dbt_build(database_url, tmp_path, *COVER_2024)
+
+    assert "WARN 4 warn_appearances_left_out_of_the_player_marts " in build.stdout
+    cursor = await connection.execute(
+        "SELECT player_id, name, nationality, height_cm, position, understat_position,"
+        " current_club_id, market_value_eur, sofascore_player_id, understat_player_id,"
+        " transfermarkt_player_id FROM marts.players ORDER BY player_id"
+    )
+    # Transfermarkt's attributes where linked, else Sofascore's, else Understat's name.
+    # Transfermarkt's club 1 is not one of our Clubs.
+    assert await cursor.fetchall() == [
+        (linked, "Sam Back", "Testland", 185, "Left-Back", "MC", None, 10_000_000, 11, 801, 102),
+        (sofascore_only, "Player 21", None, None, None, None, None, None, 21, None, None),
+        (understat_only, "Player 802", None, None, None, "MC", None, None, None, 802, None),
+    ]
+
+    cursor = await connection.execute(
+        "SELECT match_id, player_id, club_id, started, minutes_played, goals, shots, tackles,"
+        " understat_xg FROM marts.appearances ORDER BY player_id, match_id"
+    )
+    # Sofascore leaves a zero statistic out: it reads 0. An Appearance only Understat holds
+    # has no Sofascore statistics: null. The stub's lineups put player 11 at home in both.
+    assert await cursor.fetchall() == [
+        (ARSENAL_CHELSEA, linked, "arsenal", True, 90, 1, 1, 0, Decimal("0.25")),
+        (CHELSEA_ARSENAL, linked, "chelsea", True, 90, 1, 1, 0, None),
+        (ARSENAL_CHELSEA, sofascore_only, "chelsea", True, 90, 0, 0, 0, None),
+        (CHELSEA_ARSENAL, sofascore_only, "arsenal", True, 90, 0, 0, 0, None),
+        (ARSENAL_CHELSEA, understat_only, "arsenal", True, 75, None, None, None, Decimal("0.25")),
+    ]
+    cursor = await connection.execute(
+        "SELECT player_id, season, appearances, minutes_played FROM marts.player_season_minutes"
+        " ORDER BY player_id"
+    )
+    assert await cursor.fetchall() == [
+        (linked, 2024, 2, 180),
+        (sofascore_only, 2024, 2, 180),
+        (understat_only, 2024, 1, 75),
+    ]
+
+    # Player 22's rating breakdowns answered 404: no Actions, and no failure.
+    cursor = await connection.execute(
+        "SELECT player_id, count(*) FROM staging.stg_sofascore__actions"
+        " WHERE match_id = 1001 GROUP BY player_id ORDER BY player_id"
+    )
+    assert await cursor.fetchall() == [(11, 4), (12, 4), (21, 4)]
+    cursor = await connection.execute(
+        "SELECT category, action_type, outcome, x, y, end_x, end_y, is_key_pass, club_id"
+        " FROM marts.actions WHERE match_id = %s AND player_id = %s ORDER BY action_id",
+        (ARSENAL_CHELSEA, linked),
+    )
+    # A failed pass has no `outcome` in Sofascore's answer; a ball carry has none at all.
+    assert await cursor.fetchall() == [
+        ("ball-carries", "ball-carry", None, 45, 60, 55, 65, False, "arsenal"),
+        ("defensive", "tackle", True, 30, 20, None, None, False, "arsenal"),
+        ("passes", "pass", True, 40, 70, 60, 75, True, "arsenal"),
+        ("passes", "pass", False, 20, 50, 80, 50, False, "arsenal"),
+    ]
+    cursor = await connection.execute("SELECT count(*) FROM marts.actions")
+    assert await cursor.fetchone() == (16,)  # players 11 and 21, two Matches, 4 each
+
+    cursor = await connection.execute(
+        "SELECT source, match_id, player_id, result, situation, body_part, x, y, xg, xgot,"
+        " assisted_by_player_id FROM marts.shots ORDER BY source, match_id"
+    )
+    # Own goals are left out. Sofascore's coordinates turn into the Actions' frame: x from
+    # the team's own goal line, y from the right touchline; Understat's scale from 0-1.
+    assert await cursor.fetchall() == [
+        ("sofascore", ARSENAL_CHELSEA, linked, "goal", "open-play", "right-foot", 90, 60,
+         Decimal("0.3"), Decimal("0.6"), None),
+        ("sofascore", CHELSEA_ARSENAL, linked, "goal", "open-play", "right-foot", 90, 60,
+         Decimal("0.3"), Decimal("0.6"), None),
+        ("understat", ARSENAL_CHELSEA, linked, "goal", "open-play", "right-foot", 90, 50,
+         Decimal("0.25"), None, understat_only),
+    ]  # fmt: skip
+
+
+async def test_the_player_marts_hold_the_covered_seasons_only(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, per_player=True)
+    await _create_clubs(connection, database_url, tmp_path)
+    await _link(connection, ("sofascore", 11), ("understat", 801))
+
+    # By default the marts cover 25/26 (ADR 35); the stubs' Matches are 24/25.
+    build = _dbt_build(database_url, tmp_path)
+
+    for mart in ("appearances", "actions", "shots", "player_season_minutes"):
+        cursor = await connection.execute(f"SELECT count(*) FROM marts.{mart}")
+        assert await cursor.fetchone() == (0,), mart
+    # The Player is there, whatever the Seasons; nothing is listed as left out.
+    cursor = await connection.execute("SELECT count(*) FROM marts.players")
+    assert await cursor.fetchone() == (1,)
+    assert "warn_appearances_left_out_of_the_player_marts" not in " ".join(
+        line for line in build.stdout.splitlines() if " WARN " in line
+    )
+
+    # The Transform Run passes `COVERED_SEASON` to dbt.
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2024)
+    await ActivityEnvironment().run(dbt.build_dbt, ["--select", "appearances"])
+    cursor = await connection.execute("SELECT season, count(*) FROM marts.appearances GROUP BY 1")
+    assert await cursor.fetchall() == [(2024, 1)]
+
+
 async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     connection: AsyncConnection[Any], database_url: str, tmp_path: Path
 ) -> None:
@@ -304,7 +452,7 @@ async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     bridges = [b for b in REEP_TEAM_BRIDGES if b[1:] != ("understat", str(CHELSEA))]
 
     result = await _create_clubs(connection, database_url, tmp_path, bridges)
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
     build = await ActivityEnvironment().run(dbt.build_dbt, THE_REST)
 
@@ -544,7 +692,7 @@ async def test_identity_lists_only_the_unlinked_records_that_played_in_the_cover
     )
     await _create_clubs(connection, database_url, tmp_path)
     await ActivityEnvironment().run(
-        DbtActivities(database_url, DBT_PROJECT).build_dbt, CLUBS_AND_MATCHES
+        DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt, CLUBS_AND_MATCHES
     )
 
     async def unlinked(covered_season: int) -> list[tuple[str, int, int]]:
@@ -587,7 +735,7 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
         task_queue=task_queue,
         workflows=[TransformWorkflow],
         activities=[
-            DbtActivities(database_url, DBT_PROJECT).build_dbt,
+            DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt,
             identity.create_clubs,
             identity.resolve_identities,
         ],
@@ -612,9 +760,10 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
 async def test_a_failed_dbt_test_fails_the_build_without_retries(
     connection: AsyncConnection[Any], database_url: str
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await _store_matches(connection)
     await ActivityEnvironment().run(dbt.build_dbt, STAGING)
+    await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
     cursor = await connection.execute(
         "INSERT INTO identity.players DEFAULT VALUES RETURNING player_id"
     )
@@ -639,7 +788,7 @@ async def test_a_failed_dbt_test_fails_the_build_without_retries(
 async def test_a_build_that_lost_its_database_connection_is_retried(
     connection: AsyncConnection[Any], database_url: str
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await _store_matches(connection)
     # Reading the Raw Responses ends the reader's own connection, as a Postgres restart would.
     await connection.execute("ALTER TABLE raw.raw_responses RENAME TO raw_responses_kept")

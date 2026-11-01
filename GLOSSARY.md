@@ -22,12 +22,13 @@ Decisions are recorded in [`docs/adr/`](docs/adr/).
 - **Transform Run** — One pass in four steps: dbt staging; Clubs created and linked; dbt Clubs and Matches; Identity Resolution for Players, then the remaining dbt models. Only one runs at a time ([ADR 31](docs/adr/0031-identity-schema-and-transform-runs.md), [ADR 34](docs/adr/0034-canonical-ids-are-ours.md)).
 - **Club** — A football club, canonical across sources, created from the Reep Release or Transfermarkt. Its ID is a slug derived by a fixed rule from its Transfermarkt name (`west-ham-united`); renames keep the old slug as an alias ([ADR 34](docs/adr/0034-canonical-ids-are-ours.md)).
 - **Season** — One league season, named by its start year (2025 is 2025/26, written "25/26" by Sofascore). Understat and Transfermarkt use the start year too. A calendar-year league uses its single year.
+- **Covered Season** — A Season the Player marts hold: 2025 (25/26) for the PoC ([ADR 35](docs/adr/0035-poc-covers-last-season.md)). Matches of other Seasons stay in staging and `marts.matches`. Set by `COVERED_SEASON`, which the Transform Run passes to dbt as the var `covered_seasons`.
 - **Competition** — A league or cup we cover, with a slug we choose (`premier-league`) and a link from each source's own competition ID.
 - **Stage** — A named part of a Competition's season: `league` for a league, `league-phase`, `round-of-16` or `final` for a cup. Named by us; a Competition has a default Stage, and a stage link can map a range of a source's round numbers to one.
 - **Match** — A single fixture, canonical across sources. Its ID is derived from our own IDs: Competition, Season, Stage, home Club and away Club (`premier-league:2025:league:arsenal:west-ham-united`).
 - **Appearance** — One Player's participation in one Match, with minutes and per-match statistics.
-- **Action** — A located on-ball event attributed to a player in a match (pass with start/end, dribble, ball carry, defensive action), from Sofascore's rating breakdown. No timestamps or sequence.
-- **Shot** — A located shot with xG (and xGOT on Sofascore). Shots arrive from two independent sources: Sofascore and Understat.
+- **Action** — A located on-ball event attributed to a player in a match (pass with start/end, dribble, ball carry, defensive action), from Sofascore's rating breakdown. No timestamps or sequence. Located on a 0–100 pitch: x from the player's own goal line towards the goal attacked, y from the right touchline to the left one.
+- **Shot** — A located shot with xG (and xGOT on Sofascore). Shots arrive from two independent sources: Sofascore and Understat. The marts keep both sources' Shots, located in the Actions' frame, and leave out own goals.
 - **Style Profile** — A per-player vector built from per-90 statistics and the spatial distribution of Actions over a season window, used for similarity search.
 - **Scouting Query** — A natural-language request to the agent ("left-back under 23, under €15M, similar to X").
 - **Scouting Report** — A generated, cited write-up about one player, produced by a long-running durable job.

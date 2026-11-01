@@ -45,3 +45,43 @@ models:
         data_tests: [unique, not_null]
       - name: name
         data_tests: [not_null]
+
+  - name: stg_sofascore__actions
+    description: >
+      Located Actions from each player's rating breakdown in a finished Match. A 404 for a
+      rating breakdown is no Actions. Coordinates run 0-100: x from the player's own goal
+      line, y from the right touchline to the left one.
+    columns:
+      - name: action_id
+        data_tests: [unique, not_null]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_sofascore__matches')
+                field: match_id
+      - name: player_id
+        data_tests: [not_null]
+      - name: category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [passes, dribbles, ball-carries, defensive]
+
+  - name: stg_sofascore__shots
+    description: >
+      Shots from each finished Match's shotmap, with xG and xGOT, located as Sofascore gives
+      them: x from the goal attacked, y from the left touchline.
+    columns:
+      - name: shot_id
+        data_tests: [unique, not_null]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_sofascore__matches')
+                field: match_id
+      - name: player_id
+        data_tests: [not_null]

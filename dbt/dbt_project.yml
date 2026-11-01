@@ -11,9 +11,17 @@ models:
     staging:
       +schema: staging
       +materialized: view
+    intermediate:
+      +materialized: ephemeral
     marts:
       +schema: marts
       +materialized: table
+
+vars:
+  # The Seasons the Player marts hold (ADR 35: the PoC covers 25/26). Stored Matches of other
+  # Seasons stay in staging and `marts.matches`. The Transform Run passes `COVERED_SEASON`;
+  # this default serves dbt run by hand.
+  covered_seasons: [2025]
 
 flags:
   send_anonymous_usage_stats: false

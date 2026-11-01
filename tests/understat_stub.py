@@ -25,7 +25,8 @@ MATCH_TEAMS = {
     3: (ARSENAL, 88),
     4: (ARSENAL, CHELSEA),
 }
-# Understat names players itself; IDs 801-804 are made up.
+# Understat names players itself; IDs 801-804 are made up. In every Match, 801 scores from
+# 802's pass, and 803 puts the ball in their own net.
 ROSTER = {"h": [(801, 90), (802, 75)], "a": [(803, 90), (804, 15)]}
 
 
@@ -82,10 +83,20 @@ def match_data(match_id: int) -> dict[str, Any]:
         "situation": "OpenPlay",
         "shotType": "RightFoot",
         "match_id": str(match_id),
-        "player_assisted": None,
+        "player_assisted": "Player 802",
         "lastAction": "Pass",
     }
-    return {"rosters": rosters, "shots": {"h": [shot], "a": []}, "tmpl": {}}
+    own_goal = shot | {
+        "id": str(match_id * 10 + 1),
+        "minute": "50",
+        "result": "OwnGoal",
+        "X": "0.03",
+        "player": "Player 803",
+        "player_id": "803",
+        "h_a": "a",
+        "player_assisted": None,
+    }
+    return {"rosters": rosters, "shots": {"h": [shot], "a": [own_goal]}, "tmpl": {}}
 
 
 class UnderstatStub:

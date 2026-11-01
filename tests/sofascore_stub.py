@@ -1,8 +1,9 @@
 """A synthetic Sofascore web API for tests. No scraped data (ADR 4): every value is made up.
 
 Event 1001 is a finished Match. Players 11 and 12 (home) and 21 and 22 (away) played; 13 sat
-on the bench, so it has no minutes and no heatmap. Player 22 came on late: its heatmap
-answers 404, which is normal and must not fail the Match. Events 1003, 1004 and 1005 are
+on the bench, so it has no minutes and no heatmap. Player 22 came on late: its heatmap and
+rating breakdown answer 404, which is normal and must not fail the Match. Player 11 scores,
+and player 21 puts the ball in their own net. Events 1003, 1004 and 1005 are
 finished Matches with the same lineups. Event 1002 has not started. Any other event answers
 404.
 
@@ -36,13 +37,22 @@ EVENT_TEAMS = {1001: (42, 38), 1003: (38, 42), 1004: (42, 38), 1005: (38, 42)}
 PLAYED = (11, 12, 21, 22)
 BENCHED = 13
 NO_HEATMAP = 22
+SCORER = 11
+OWN_GOAL_SCORER = 21
+HOME_PLAYERS = (11, 12, 13)
 BASE = "/api/v1/event"
+
+
+# Sofascore leaves a zero statistic out of a lineup entry.
+SCORER_STATISTICS = {"goals": 1, "totalShots": 1, "expectedGoals": 0.3, "totalPass": 2}
 
 
 def _entry(player_id: int, minutes: int | None, substitute: bool = False) -> dict[str, Any]:
     statistics: dict[str, Any] = {"ratingVersions": {}}
     if minutes is not None:
         statistics |= {"minutesPlayed": minutes, "rating": 7.0}
+    if player_id == SCORER:
+        statistics |= SCORER_STATISTICS
     return {
         "player": {"id": player_id, "name": f"Player {player_id}"},
         "teamId": player_id // 10,
@@ -73,6 +83,87 @@ LINEUPS = {
     "home": {"players": [_entry(11, 90), _entry(12, 90), _entry(BENCHED, None, substitute=True)]},
     "away": {"players": [_entry(21, 90), _entry(22, 4, substitute=True)]},
 }
+
+
+def _shot(shot_id: int, player_id: int, is_home: bool, **details: Any) -> dict[str, Any]:
+    return {
+        "id": shot_id,
+        "player": {"id": player_id, "name": f"Player {player_id}"},
+        "isHome": is_home,
+        "time": 10,
+        "situation": "assisted",
+        "bodyPart": "right-foot",
+        "xg": 0.3,
+    } | details
+
+
+def _shotmap(event_id: int) -> list[dict[str, Any]]:
+    """Player 11's goal, from 10 metres out and left of centre; Sofascore measures x from
+    the goal attacked and y from the left touchline. Then player 21's own goal."""
+    coordinates = {"x": 10, "y": 40, "z": 0}
+    return [
+        _shot(
+            event_id * 10 + 1,
+            SCORER,
+            True,
+            shotType="goal",
+            goalType="regular",
+            xgot=0.6,
+            playerCoordinates=coordinates,
+        ),
+        _shot(
+            event_id * 10 + 2,
+            OWN_GOAL_SCORER,
+            False,
+            shotType="goal",
+            goalType="own",
+            playerCoordinates={"x": 3, "y": 50, "z": 0},
+        ),
+    ]
+
+
+def _rating_breakdown(player_id: int) -> dict[str, Any]:
+    """Every player's rating breakdown: a completed pass, a failed one (Sofascore leaves out
+    `outcome`), a ball carry and a won tackle."""
+    is_home = player_id in HOME_PLAYERS
+    return {
+        "passes": [
+            {
+                "isHome": is_home,
+                "outcome": True,
+                "keypass": True,
+                "eventActionType": "pass",
+                "playerCoordinates": {"x": 40, "y": 70},
+                "passEndCoordinates": {"x": 60, "y": 75},
+            },
+            {
+                "isHome": is_home,
+                "keypass": False,
+                "isLongBall": True,
+                "eventActionType": "pass",
+                "playerCoordinates": {"x": 20, "y": 50},
+                "passEndCoordinates": {"x": 80, "y": 50},
+            },
+        ],
+        "dribbles": [],
+        "ball-carries": [
+            {
+                "isHome": is_home,
+                "eventActionType": "ball-carry",
+                "playerCoordinates": {"x": 45, "y": 60},
+                "passEndCoordinates": {"x": 55, "y": 65},
+            }
+        ],
+        "defensive": [
+            {
+                "isHome": is_home,
+                "outcome": True,
+                "keypass": False,
+                "eventActionType": "tackle",
+                "playerCoordinates": {"x": 30, "y": 20},
+            }
+        ],
+    }
 
 
 class SofascoreStub:
@@ -108,16 +199,16 @@ class SofascoreStub:
         if path == f"{match}/lineups":
             return httpx.Response(200, json=LINEUPS)
         if path == f"{match}/shotmap":
-            return httpx.Response(200, json={"shotmap": [{"player": {"id": 11}, "xg": 0.3}]})
+            return httpx.Response(200, json={"shotmap": _shotmap(event_id)})
         if path == f"{match}/average-positions":
             return httpx.Response(200, json={"home": [], "away": []})
-        if path == f"{match}/player/{NO_HEATMAP}/heatmap":
+        if path.startswith(f"{match}/player/{NO_HEATMAP}/"):
             return _not_found()
         for player_id in PLAYED:
             if path == f"{match}/player/{player_id}/heatmap":
                 return httpx.Response(200, json={"heatmap": [{"x": 50, "y": 50}]})
             if path == f"{match}/player/{player_id}/rating-breakdown":
-                return httpx.Response(200, json={"passes": [], "dribbles": []})
+                return httpx.Response(200, json=_rating_breakdown(player_id))
         return _not_found()
 
     def transport(self) -> httpx.MockTransport:
