@@ -19,10 +19,22 @@ if [[ "$worktree" == "$main" ]]; then
     exit 1
 fi
 
-# Postgres names stop at 63 bytes; keep room for the `_test` suffix of tests/conftest.py.
-slug=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | cut -c1-40)
+# Postgres truncates names at 63 bytes. 18 + 30 leaves 15 for suffixes a test adds to
+# the database name (`_test` from tests/conftest.py, then a migration test's own).
+slug=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | cut -c1-30)
 database="football_intel_wt_${slug}"
 queue="wt-${slug}"
+
+# A worktree set up earlier keeps the names its .env already holds, so teardown
+# drops the database it actually has.
+if [[ -f "$worktree/.env" ]]; then
+    existing=$(sed -n 's/^POSTGRES_DB=\(football_intel_wt_[a-z0-9_]*\)$/\1/p' "$worktree/.env" | tail -1)
+    if [[ -n "$existing" ]]; then
+        database=$existing
+        queue=$(sed -n 's/^TEMPORAL_TASK_QUEUE=\(wt-[a-z0-9_]*\)$/\1/p' "$worktree/.env" | tail -1)
+        queue=${queue:-wt-${slug}}
+    fi
+fi
 
 compose() {
     docker compose --project-directory "$main" -f "$main/compose.yaml" "$@"
@@ -30,7 +42,7 @@ compose() {
 
 psql_live() {
     # Runs inside the Postgres container, as the live database's owner.
-    compose exec -T postgres sh -c "psql -v ON_ERROR_STOP=1 -q -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" $*"
+    compose exec -T -e PGOPTIONS="-c client_min_messages=warning" postgres sh -c "psql -v ON_ERROR_STOP=1 -q -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\" $*"
 }
 
 postgres_up() {
