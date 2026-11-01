@@ -535,3 +535,172 @@ def test_recreating_players_stops_when_a_judge_or_reviewer_decided(
             admin.execute(
                 sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database))
             )
+
+
+# The creation check (ADR 39): Reep's person rA has only Sofascore 1; Transfermarkt 10 is the
+# same man, with no Reep bridge.
+ONLY_SOFASCORE = [ReepBridge("rA", "sofascore", 1), ReepBridge("rA", "understat", 100)]
+
+
+def _konsa(sofascore: str = "Ezri Konsa", transfermarkt: str = "Ezri Konsa") -> SourceRecords:
+    return _records(
+        sofascore=[SourcePlayer(1, sofascore, BORN)],
+        transfermarkt=[SourcePlayer(10, transfermarkt, date(1999, 5, 2))],
+        understat=[SourcePlayer(100, "Ezri Konsa")],
+        sofascore_appearances=_season(1, [90, 90]),
+        understat_appearances=_season(100, [90, 90]),
+    )
+
+
+async def _reject(connection: AsyncConnection[Any], source: str, record: int) -> None:
+    await connection.execute(
+        "UPDATE identity.identity_candidates SET status = 'rejected'"
+        " WHERE source = %s AND source_record_id = %s",
+        (source, str(record)),
+    )
+
+
+async def test_transfermarkt_links_to_the_player_reep_created_without_its_bridge(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    resolution = await resolve(identity, _konsa(), RELEASE, ONLY_SOFASCORE)
+
+    assert resolution.players_created == await _players(connection) == 1
+    assert await _candidates(connection) == [
+        ("sofascore", "1", 1, "reep_bridge", "accepted"),
+        ("understat", "100", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "10", 1, "creation_check", "accepted"),
+    ]
+
+
+async def test_reep_links_to_the_player_transfermarkt_created_a_run_before(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    # Run N holds only the Transfermarkt record; run N+1 a new Reep release bridging the
+    # Sofascore and Understat records, but not the Transfermarkt one.
+    await resolve(identity, _records(transfermarkt=_konsa().transfermarkt), None, None)
+
+    resolution = await resolve(identity, _konsa(), RELEASE, ONLY_SOFASCORE)
+
+    assert resolution.players_created == 0
+    assert await _players(connection) == 1
+    assert await _candidates(connection) == [
+        ("transfermarkt", "10", 1, "transfermarkt_player", "accepted"),
+        ("sofascore", "1", 1, "creation_check", "accepted"),
+        ("understat", "100", 1, "reep_bridge", "accepted"),
+    ]
+
+
+async def test_a_similar_name_waits_for_the_judge_and_creates_no_player(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    resolution = await resolve(
+        identity, _konsa("Andy Robertson", "Andrew Robertson"), RELEASE, ONLY_SOFASCORE
+    )
+
+    assert resolution.players_created == await _players(connection) == 1
+    assert (await _candidates(connection))[-1] == (
+        "transfermarkt",
+        "10",
+        1,
+        "creation_check",
+        "pending",
+    )
+
+
+async def test_a_rejected_creation_check_creates_the_player_on_the_next_run(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    records = _konsa("Andy Robertson", "Andrew Robertson")
+    await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+    await _reject(connection, "transfermarkt", 10)
+
+    resolution = await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+
+    assert resolution.players_created == 1
+    assert (await _candidates(connection))[-1] == (
+        "transfermarkt",
+        "10",
+        2,
+        "transfermarkt_player",
+        "accepted",
+    )
+
+
+async def test_a_reep_person_waits_while_its_creation_check_waits(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    records = _konsa("Andy Robertson", "Andrew Robertson")
+    await resolve(identity, _records(transfermarkt=records.transfermarkt), None, None)
+
+    # Sofascore 1 may be Transfermarkt 10's Player: neither it nor Understat 100, the same
+    # Reep person, creates a Player, on this run or the next.
+    await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+    resolution = await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+
+    assert await _players(connection) == 1
+    assert await _candidates(connection) == [
+        ("transfermarkt", "10", 1, "transfermarkt_player", "accepted"),
+        ("sofascore", "1", 1, "creation_check", "pending"),
+    ]
+    assert _unlinked(resolution) == [("sofascore", 1, True), ("understat", 100, False)]
+
+    # A person rejects the link: the Reep person creates its own Player.
+    await _reject(connection, "sofascore", 1)
+    resolution = await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+
+    assert resolution.players_created == 1
+    assert (await _candidates(connection))[-2:] == [
+        ("sofascore", "1", 2, "reep_bridge", "accepted"),
+        ("understat", "100", 2, "reep_bridge", "accepted"),
+    ]
+
+
+async def test_an_accepted_creation_check_brings_the_reep_person_s_other_records(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    records = _konsa("Andy Robertson", "Andrew Robertson")
+    await resolve(identity, _records(transfermarkt=records.transfermarkt), None, None)
+    await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+    await connection.execute(
+        "UPDATE identity.identity_candidates SET status = 'accepted' WHERE status = 'pending'"
+    )
+
+    resolution = await resolve(identity, records, RELEASE, ONLY_SOFASCORE)
+
+    assert resolution.players_created == 0
+    assert (await _candidates(connection))[-1] == (
+        "understat",
+        "100",
+        1,
+        "reep_bridge",
+        "accepted",
+    )
+
+
+async def test_two_reep_persons_matching_one_player_link_only_the_first(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    await resolve(identity, _records(transfermarkt=_konsa().transfermarkt), None, None)
+    records = _records(
+        sofascore=[SourcePlayer(1, "Ezri Konsa", BORN), SourcePlayer(2, "Ezri Konsa", BORN)],
+        transfermarkt=_konsa().transfermarkt,
+        understat=[SourcePlayer(100, "Ezri Konsa")],
+        sofascore_appearances=_season(2, [90, 90]),
+        understat_appearances=_season(100, [90, 90]),
+    )
+    bridges = [
+        ReepBridge("rA", "sofascore", 1),
+        ReepBridge("rB", "sofascore", 2),
+        ReepBridge("rB", "understat", 100),
+    ]
+
+    await resolve(identity, records, RELEASE, bridges)
+
+    # Reep says 1 and 2 are two men, so the judge decides the second; rB waits with it.
+    assert await _players(connection) == 1
+    assert await _candidates(connection) == [
+        ("transfermarkt", "10", 1, "transfermarkt_player", "accepted"),
+        ("sofascore", "1", 1, "creation_check", "accepted"),
+        ("sofascore", "2", 1, "creation_check", "pending"),
+    ]

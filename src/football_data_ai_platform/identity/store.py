@@ -13,7 +13,8 @@ from football_data_ai_platform.identity.rules import Method, Proposal, RecordKey
 class IdentityStore:
     """Writes Players and Identity Candidates. A Source Record is only ever proposed once:
     a re-run leaves earlier Candidates, accepted, pending or rejected, as they are, except
-    that a rejected Reep link reopens its Source Record to the rules."""
+    that a rejected Reep link reopens its Source Record to the rules, and a rejected creation
+    check to creating its Player (`proposed`)."""
 
     def __init__(self, connection: AsyncConnection[Any]) -> None:
         self._connection = connection
@@ -29,16 +30,49 @@ class IdentityStore:
         return {(source, record): player for source, record, player in await cursor.fetchall()}
 
     async def proposed(self, *, reopen_rejected_reep: bool = True) -> set[RecordKey]:
-        """The Source Records that have a Candidate. A record whose only Candidates are
-        rejected Reep links is left out unless `reopen_rejected_reep` is False, so the rules
-        can link it once a reviewer rejects a wrong Reep link (ADR 32)."""
+        """The Source Records that have a Candidate. Some rejections reopen a record, which
+        is then left out:
+
+        - a record whose only Candidates are rejected Reep links, unless
+          `reopen_rejected_reep` is False, so the rules can link it once a reviewer rejects
+          a wrong Reep link (ADR 32);
+        - a record whose only Candidates are rejected creation checks, or those and rejected
+          Reep links, so it can create its own Player (ADR 39).
+        """
+        reopening = [Method.CREATION_CHECK]
+        if reopen_rejected_reep:
+            reopening.append(Method.REEP_BRIDGE)
         cursor = await self._connection.execute(
             """
             SELECT source, source_record_id::bigint FROM identity.identity_candidates
             GROUP BY source, source_record_id
-            HAVING %s OR bool_or(NOT (method = %s AND status = 'rejected'))
+            HAVING bool_or(NOT (method = ANY(%s) AND status = 'rejected'))
             """,
-            (not reopen_rejected_reep, Method.REEP_BRIDGE),
+            (reopening,),
+        )
+        return {(source, record) for source, record in await cursor.fetchall()}
+
+    async def rejected(self) -> dict[RecordKey, set[int]]:
+        """The Players each Source Record's rejected Candidates point at."""
+        cursor = await self._connection.execute(
+            """
+            SELECT source, source_record_id::bigint, player_id
+            FROM identity.identity_candidates WHERE status = 'rejected'
+            """
+        )
+        rejected: dict[RecordKey, set[int]] = {}
+        for source, record, player in await cursor.fetchall():
+            rejected.setdefault((source, record), set()).add(player)
+        return rejected
+
+    async def waiting(self) -> set[RecordKey]:
+        """The Source Records whose creation check waits for the judge or a person."""
+        cursor = await self._connection.execute(
+            """
+            SELECT source, source_record_id::bigint FROM identity.identity_candidates
+            WHERE method = %s AND status = 'pending'
+            """,
+            (Method.CREATION_CHECK,),
         )
         return {(source, record) for source, record in await cursor.fetchall()}
 

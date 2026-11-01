@@ -1,7 +1,8 @@
 """The rules that create Players and link Source Records to them (ADR 34). Pure functions:
 the database is read and written elsewhere.
 
-Reep, then Transfermarkt, create Players. Sofascore and Understat only link to them:
+Reep, then Transfermarkt, create Players, each only after a creation check finds no existing
+Player with the same name and birth date (ADR 39). Sofascore and Understat only link to them:
 Sofascore by birth date and name against a Player's Transfermarkt record, Understat by
 co-appearance with a Player's Sofascore Appearances. Proposals at or above `ACCEPT_FROM`
 become links; those from `JUDGE_FROM` are the ambiguous band left to the LLM judge; lower
@@ -9,7 +10,7 @@ scores are not proposed at all.
 """
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -44,12 +45,17 @@ class Method:
     NAME_BIRTH_DATE = "name_birth_date"
     CO_APPEARANCE = "co_appearance"
     FUZZY = "fuzzy"
+    # A record Reep or Transfermarkt would create a Player for, linked to an existing one
+    # instead (ADR 39). Rejecting one reopens the record, to create its Player.
+    CREATION_CHECK = "creation_check"
 
 
 # The methods that create a Player when its Source Record has none yet.
 CREATING_METHODS = frozenset({Method.REEP_BRIDGE, Method.TRANSFERMARKT_PLAYER})
 
 RecordKey = tuple[str, int]  # (source, source_record_id)
+# The sources with birth dates, each matched by name and birth date against the other.
+OTHER_SOURCE = {SOFASCORE: TRANSFERMARKT, TRANSFERMARKT: SOFASCORE}
 # A Proposal's Player: an existing Player's ID, or the key of a Player it creates, such as
 # `reep:<reep_id>` or `transfermarkt:<id>`. Proposals sharing a key share the new Player.
 Target = int | str
@@ -110,9 +116,11 @@ def reep_proposals(
     held: Mapping[str, set[int]],
     proposed: set[RecordKey],
     links: Mapping[RecordKey, int],
-    birth_dates: Mapping[RecordKey, date | None],
+    records: Mapping[RecordKey, SourcePlayer],
     sofascore: Sequence[Appearance],
     understat: Sequence[Appearance],
+    rejected: Mapping[RecordKey, set[int]] | None = None,
+    waiting: set[RecordKey] | None = None,
 ) -> list[Proposal]:
     """Reep decides first (ADR 32, ADR 34): every Source Record we hold (`held`) that the
     release maps to a Reep person links to that person's Player. The person's first record
@@ -126,26 +134,65 @@ def reep_proposals(
     - A Transfermarkt or Understat link our data contradicts is pending, not accepted: its
       birth date is more than a day off the Player's Sofascore record, or it never played in
       the same Match for the same Club as that record.
+    - Before a person creates a Player, its Sofascore and Transfermarkt records run the
+      creation check (`creation_checks`; `records` gives their names and birth dates, and
+      `rejected` the Players already rejected for them). The first that matches an existing
+      Player links to it, and the person's other records follow it there. One that only may
+      match waits for the judge, and the whole person waits with it (`waiting`: records with
+      a pending creation check), so none of its records creates the Player meanwhile.
     """
+    waiting = waiting or set()
     persons = _persons(bridges, held)
+    existing = {source: players_without(source, links, records) for source in OTHER_SOURCE}
+    checks = {
+        (source, record): proposal
+        for source in OTHER_SOURCE
+        for record, proposal in creation_checks(
+            source,
+            [
+                player
+                for (of, _), player in sorted(records.items())
+                if of == source and (of, player.source_record_id) not in proposed
+            ],
+            existing[source],
+            rejected,
+        ).items()
+    }
     sofascore_of = {
         player: record for (source, record), player in links.items() if source == SOFASCORE
     }
     played = _played(sofascore), _played(understat)
+    claimed: set[Target] = set()  # existing Players a creation check linked a person to
     proposals: list[Proposal] = []
     for reep_id, members in persons.items():
         keys = [(m.source, m.source_record_id) for m in members]
         players = {links[key] for key in keys if key in links}
         if len(players) > 1:
             continue
-        target: Target = players.pop() if players else f"reep:{reep_id}"
+        target: Target
+        checked: RecordKey | None = None
+        if players:
+            target = players.pop()
+        elif any(key in waiting for key in keys):
+            continue
+        elif check := next((checks[key] for key in keys if key in checks), None):
+            proposals.append(check)
+            if not check.accepted or check.player in claimed:
+                # The store makes a second claim on one Player pending, too.
+                continue
+            target = check.player
+            checked = (check.source, check.source_record_id)
+            claimed.add(check.player)
+        else:
+            target = f"reep:{reep_id}"
         own = [m.source_record_id for m in members if m.source == SOFASCORE]
         if own:
             anchor: int | None = own[0]
         else:
             anchor = sofascore_of.get(target) if isinstance(target, int) else None
         for member in members:
-            if (member.source, member.source_record_id) in proposed:
+            key = (member.source, member.source_record_id)
+            if key in proposed or key == checked:
                 continue
             proposals.append(
                 Proposal(
@@ -161,7 +208,7 @@ def reep_proposals(
                         "route_scope": member.route_scope,
                     },
                     decided_by=f"reep:{release}",
-                    disagreement=_disagreement(member, anchor, birth_dates, *played),
+                    disagreement=_disagreement(member, anchor, records, *played),
                 )
             )
     return proposals
@@ -222,7 +269,7 @@ def _played(appearances: Iterable[Appearance]) -> dict[int, set[tuple[str, str]]
 def _disagreement(
     member: ReepBridge,
     sofascore_record: int | None,
-    birth_dates: Mapping[RecordKey, date | None],
+    records: Mapping[RecordKey, SourcePlayer],
     sofascore: Mapping[int, set[tuple[str, str]]],
     understat: Mapping[int, set[tuple[str, str]]],
 ) -> str | None:
@@ -231,8 +278,8 @@ def _disagreement(
     if sofascore_record is None or member.source == SOFASCORE:
         return None
     if member.source == TRANSFERMARKT:
-        born = birth_dates.get((TRANSFERMARKT, member.source_record_id))
-        anchor_born = birth_dates.get((SOFASCORE, sofascore_record))
+        born = _born(records, (TRANSFERMARKT, member.source_record_id))
+        anchor_born = _born(records, (SOFASCORE, sofascore_record))
         if born and anchor_born and abs((born - anchor_born).days) > BIRTH_DATE_TOLERANCE_DAYS:
             return f"born {born}, but Sofascore player {sofascore_record} was born {anchor_born}"
     if member.source == UNDERSTAT and not (
@@ -245,11 +292,27 @@ def _disagreement(
     return None
 
 
-def transfermarkt_players(transfermarkt: Iterable[SourcePlayer]) -> list[Proposal]:
-    """Each Transfermarkt player creates a Player (ADR 34). Called after Reep, for the
-    records Reep did not link: the store skips any record that already has a Candidate."""
+def _born(records: Mapping[RecordKey, SourcePlayer], key: RecordKey) -> date | None:
+    record = records.get(key)
+    return record.birth_date if record is not None else None
+
+
+def transfermarkt_players(
+    transfermarkt: Iterable[SourcePlayer],
+    links: Mapping[RecordKey, int],
+    records: Mapping[RecordKey, SourcePlayer],
+    rejected: Mapping[RecordKey, set[int]] | None = None,
+) -> list[Proposal]:
+    """Each Transfermarkt player creates a Player (ADR 34), unless the creation check links
+    it to an existing one or leaves it to the judge (`creation_checks`, ADR 39). Called
+    after Reep, for the records Reep did not link: the store skips any record that already
+    has a Candidate."""
+    checks = creation_checks(
+        TRANSFERMARKT, transfermarkt, players_without(TRANSFERMARKT, links, records), rejected
+    )
     return [
-        Proposal(
+        checks.get(player.source_record_id)
+        or Proposal(
             TRANSFERMARKT,
             player.source_record_id,
             f"transfermarkt:{player.source_record_id}",
@@ -261,6 +324,52 @@ def transfermarkt_players(transfermarkt: Iterable[SourcePlayer]) -> list[Proposa
     ]
 
 
+def players_without(
+    source: str, links: Mapping[RecordKey, int], records: Mapping[RecordKey, SourcePlayer]
+) -> dict[int, SourcePlayer]:
+    """The Players a `source` record may belong to by name and birth date: each one holding
+    a record of the other source (`OTHER_SOURCE`) and none of `source`'s, with that record.
+    `links` holds accepted links only; `records` the held records, by key."""
+    other = OTHER_SOURCE[source]
+    holding = {player for (of, _), player in links.items() if of == source}
+    return {
+        player: records[key]
+        for key, player in links.items()
+        if key[0] == other and player not in holding and key in records
+    }
+
+
+def creation_checks(
+    source: str,
+    players: Iterable[SourcePlayer],
+    existing: Mapping[int, SourcePlayer],
+    rejected: Mapping[RecordKey, set[int]] | None = None,
+) -> dict[int, Proposal]:
+    """The creation check (ADR 39): before Reep or Transfermarkt creates a Player for a
+    `source` record, the name and birth date rule of `sofascore_proposals` runs against
+    `existing` (`players_without`), less the Players already rejected for the record.
+
+    Returns, by record, a Proposal to the existing Player: accepted for the same name,
+    pending for the judge when the name is only similar or a second same-named Player is
+    inside the window. A record left out creates its own Player.
+    """
+    rejected = rejected or {}
+    index = _by_birth_date(existing)
+    checks: dict[int, Proposal] = {}
+    for player in players:
+        match = _match(
+            player, index, OTHER_SOURCE[source], rejected.get((source, player.source_record_id))
+        )
+        if match is None:
+            continue
+        player_id, sure, score, evidence = match
+        confidence = 1.0 if sure else min(score, ACCEPT_FROM - 0.01)
+        checks[player.source_record_id] = Proposal(
+            source, player.source_record_id, player_id, Method.CREATION_CHECK, confidence, evidence
+        )
+    return checks
+
+
 def sofascore_proposals(
     sofascore: Iterable[SourcePlayer], transfermarkt: Mapping[int, SourcePlayer]
 ) -> list[Proposal]:
@@ -268,43 +377,72 @@ def sofascore_proposals(
     Player ID) was born within `BIRTH_DATE_TOLERANCE_DAYS` of it. The same name: a link. A
     similar name (a nickname, a transliteration), or a second same-named record inside the
     window: left to the judge. Birth date only: no proposal."""
-    by_birth_date: dict[date, list[tuple[int, SourcePlayer]]] = defaultdict(list)
-    for player_id, record in transfermarkt.items():
-        if record.birth_date is not None:
-            by_birth_date[record.birth_date].append((player_id, record))
-    window = range(-BIRTH_DATE_TOLERANCE_DAYS, BIRTH_DATE_TOLERANCE_DAYS + 1)
+    index = _by_birth_date(transfermarkt)
     proposals: list[Proposal] = []
     for player in sofascore:
-        if player.birth_date is None:
+        match = _match(player, index, TRANSFERMARKT)
+        if match is None:
             continue
-        scored = sorted(
-            (
-                (similarity(player.name, record.name), abs(gap), player_id, record)
-                for gap in window
-                for player_id, record in by_birth_date[player.birth_date + timedelta(gap)]
-            ),
-            key=lambda scored: (-scored[0], scored[1], scored[2]),
-        )
-        if not scored or scored[0][0] < JUDGE_FROM:
-            continue
-        name_score, gap, player_id, best = scored[0]
-        runner_up = scored[1][0] if len(scored) > 1 else 0.0
-        evidence = {
-            "name": player.name,
-            "candidate": best.name,
-            "transfermarkt_record_id": best.source_record_id,
-            "name_similarity": round(name_score, 3),
-            "birth_date_gap_days": gap,
-        }
-        if name_score >= SAME_NAME and runner_up < SAME_NAME:
+        player_id, sure, score, evidence = match
+        if sure:
             method, confidence = Method.NAME_BIRTH_DATE, 1.0
         else:
             # Below ACCEPT_FROM whatever the name score, so the judge decides.
-            method, confidence = Method.FUZZY, min(name_score, ACCEPT_FROM - 0.01)
+            method, confidence = Method.FUZZY, min(score, ACCEPT_FROM - 0.01)
         proposals.append(
             Proposal(SOFASCORE, player.source_record_id, player_id, method, confidence, evidence)
         )
     return proposals
+
+
+_BirthDates = dict[date, list[tuple[int, SourcePlayer]]]
+
+
+def _by_birth_date(records: Mapping[int, SourcePlayer]) -> _BirthDates:
+    """Each Player's record (`records`, by Player ID), by its birth date."""
+    index: _BirthDates = defaultdict(list)
+    for player_id, record in records.items():
+        if record.birth_date is not None:
+            index[record.birth_date].append((player_id, record))
+    return index
+
+
+def _match(
+    player: SourcePlayer,
+    index: _BirthDates,
+    other_source: str,
+    skip: Container[int] | None = None,
+) -> tuple[int, bool, float, dict[str, Any]] | None:
+    """The name and birth date rule: the Player whose record in `index` was born within
+    `BIRTH_DATE_TOLERANCE_DAYS` of `player` with the most similar name, unless it is in
+    `skip`. Returns its ID, whether the name decides (the same name, and no second
+    same-named record in the window), the name score, and the evidence; None when no name
+    in the window reaches `JUDGE_FROM`."""
+    if player.birth_date is None:
+        return None
+    window = range(-BIRTH_DATE_TOLERANCE_DAYS, BIRTH_DATE_TOLERANCE_DAYS + 1)
+    scored = sorted(
+        (
+            (similarity(player.name, record.name), abs(gap), player_id, record)
+            for gap in window
+            for player_id, record in index.get(player.birth_date + timedelta(gap), [])
+            if skip is None or player_id not in skip
+        ),
+        key=lambda scored: (-scored[0], scored[1], scored[2]),
+    )
+    if not scored or scored[0][0] < JUDGE_FROM:
+        return None
+    name_score, gap, player_id, best = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+    evidence = {
+        "name": player.name,
+        "candidate": best.name,
+        f"{other_source}_record_id": best.source_record_id,
+        "name_similarity": round(name_score, 3),
+        "birth_date_gap_days": gap,
+    }
+    sure = name_score >= SAME_NAME and runner_up < SAME_NAME
+    return player_id, sure, name_score, evidence
 
 
 @dataclass(frozen=True)

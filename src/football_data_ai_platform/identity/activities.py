@@ -24,6 +24,7 @@ from football_data_ai_platform.identity.rules import (
     ReepBridge,
     ReepConflict,
     SourcePlayer,
+    players_without,
     reep_conflicts,
     reep_proposals,
     sofascore_proposals,
@@ -271,6 +272,9 @@ async def resolve(
     3. Sofascore records, by birth date and name against the Players' Transfermarkt records;
     4. Understat records, by co-appearance with the Players' Sofascore Appearances.
 
+    Before steps 1 and 2 create a Player, the creation check links the record to an existing
+    Player with its name and birth date instead (ADR 39).
+
     Each step sees the links of the steps before it. Sofascore and Understat create no
     Player: what links to none is listed as unlinked.
     """
@@ -283,6 +287,7 @@ async def resolve(
         resolution.players_created += created
         return _by_source(await store.links())
 
+    by_key = {(source, p.source_record_id): p for source, ps in held.items() for p in ps}
     if reep_release is not None and bridges is not None:
         ours = {source: {p.source_record_id for p in ps} for source, ps in held.items()}
         resolution.reep_conflicts = reep_conflicts(bridges, ours, await store.links())
@@ -293,27 +298,22 @@ async def resolve(
                 ours,
                 await store.proposed(reopen_rejected_reep=False),
                 await store.links(),
-                {
-                    (source, p.source_record_id): p.birth_date
-                    for source, ps in held.items()
-                    for p in ps
-                },
+                by_key,
                 records.sofascore_appearances,
                 records.understat_appearances,
+                await store.rejected(),
+                await store.waiting(),
             )
         )
-    links = await propose(transfermarkt_players(records.transfermarkt))
+    await propose(
+        transfermarkt_players(
+            records.transfermarkt, await store.links(), by_key, await store.rejected()
+        )
+    )
 
-    by_id = {source: {p.source_record_id: p for p in ps} for source, ps in held.items()}
-    with_sofascore = set(links[SOFASCORE].values())
     links = await propose(
         sofascore_proposals(
-            records.sofascore,
-            {
-                player: by_id[TRANSFERMARKT][record]
-                for record, player in links[TRANSFERMARKT].items()
-                if player not in with_sofascore and record in by_id[TRANSFERMARKT]
-            },
+            records.sofascore, players_without(SOFASCORE, await store.links(), by_key)
         )
     )
 

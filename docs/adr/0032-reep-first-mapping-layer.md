@@ -1,6 +1,6 @@
 # 32. The Reep register is the first mapping layer of Identity Resolution
 
-Status: Accepted — 2026-10-25. Refines ADR 6 (identity resolution). Extended to Clubs by ADR 33. Amended by ADR 34 (Reep and Transfermarkt create Players; the load keeps entities bridged to two ingested providers). The veto proposed below is implemented (#69).
+Status: Accepted — 2026-10-25. Refines ADR 6 (identity resolution). Extended to Clubs by ADR 33. Amended by ADR 34 (Reep and Transfermarkt create Players; the load keeps entities bridged to two ingested providers). The veto proposed below is implemented (#69). Amended by ADR 39 (a rejected `creation_check` Candidate reopens its record too).
 
 ## Context
 Identity Resolution (ADR 6, #47) links Transfermarkt and Understat players to the Sofascore players that anchor Players, with deterministic rules, fuzzy scoring, an LLM judge and human review. Its rules work on the data we have ingested.
