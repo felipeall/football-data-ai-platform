@@ -175,7 +175,7 @@ How a Source Record is linked:
 2. **Rules, for the rest.** Every Sofascore player is a Player. A Transfermarkt player links to the Sofascore player with the same birth date and the same name. An Understat player links to the Sofascore teammate who played the same Matches for the same Club with the same name and minutes.
 3. **Fuzzy scoring.** Other close candidates are scored on name, co-appearance and minutes. A clear best links as `fuzzy`; the rest stay pending for the LLM judge.
 
-Results go to the Alembic-managed `identity` schema: `identity.players`, and `identity.identity_candidates` with each Candidate's method, confidence, status and evidence. A re-run proposes only Source Records that have no Candidate yet. The one exception is a rejected Reep link: setting a `reep_bridge` Candidate's status to `rejected` lets the rules link its Source Record on the next run. Transfermarkt has only the current squads, so players who left the Premier League since 24/25 have no Transfermarkt link.
+Results go to the Alembic-managed `identity` schema: `identity.players`, and `identity.identity_candidates` with each Candidate's method, confidence, status and evidence. A re-run proposes only Source Records that have no Candidate yet. The one exception is a rejected Reep link: setting a `reep_bridge` Candidate's status to `rejected` lets the rules link its Source Record on the next run. The PoC covers one season, 25/26, so Transfermarkt squads are stored for `--season 2025` only ([ADR 35](docs/adr/0035-poc-covers-last-season.md)). A past season's squad is the club's roster when that season ended. A player who left during the season, or an academy player who debuted, may have no Transfermarkt record, so no Transfermarkt link.
 
 ## Development
 

@@ -1,6 +1,6 @@
 # 34. Canonical IDs are ours, created from Reep, then Transfermarkt
 
-Status: Accepted — 2026-10-25. Supersedes ADR 33. Amends ADR 31 (Transform Run steps) and ADR 32 (who creates Players, the Reep load).
+Status: Accepted — 2026-10-25. Supersedes ADR 33. Amends ADR 31 (Transform Run steps) and ADR 32 (who creates Players, the Reep load). Amended by ADR 35: Transfermarkt squads for 25/26 only; a past squad is the end-of-season roster.
 
 ## Context
 Every scraped source may go away: a site can close, change its API, or block scraping for good. Sofascore did for six days in October 2026 (ADR 30). So the platform's canonical entities must not take their identity from any scraped source.
