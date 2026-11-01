@@ -425,7 +425,8 @@ def test_recreating_players_stops_when_a_judge_or_reviewer_decided(
     status: str, decided_by: str | None
 ) -> None:
     settings = Settings()
-    database = f"{settings.postgres_db}_recreation"
+    # A 5-byte suffix, like `_test`: worktree database names leave no more room.
+    database = f"{settings.postgres_db}_0008"
     url = settings.model_copy(update={"postgres_db": database}).database_url
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", url)
