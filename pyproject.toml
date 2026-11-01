@@ -31,6 +31,7 @@ dev = [
     "pyright",
     "pytest",
     "pytest-asyncio==1.4.0",
+    "pytest-xdist==3.8.0",
     "ruff",
 ]
 
@@ -52,7 +53,7 @@ typeCheckingMode = "strict"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers"]
+addopts = ["--strict-markers", "--numprocesses=auto", "--dist=worksteal"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"

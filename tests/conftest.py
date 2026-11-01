@@ -13,13 +13,21 @@ from football_data_ai_platform.config import Settings
 
 
 @pytest.fixture(scope="session")
-def database_url() -> Iterator[str]:
-    """A fresh test database next to the application database, migrated to head.
+def worker(worker_id: str) -> str:
+    """The pytest-xdist worker's number (`3` for `gw3`), empty without xdist. Tests append
+    it to the databases they create, so workers running in parallel never share one."""
+    return worker_id.removeprefix("gw") if worker_id != "master" else ""
+
+
+@pytest.fixture(scope="session")
+def database_url(worker: str) -> Iterator[str]:
+    """A fresh test database next to the application database, migrated to head, one per
+    pytest-xdist worker.
 
     Skipped when Postgres is unreachable, except in CI, where it must be there.
     """
     settings = Settings()
-    test_db = f"{settings.postgres_db}_test"
+    test_db = f"{settings.postgres_db}_test{worker}"
     try:
         admin = psycopg.connect(settings.database_url, autocommit=True, connect_timeout=3)
     except psycopg.OperationalError as error:

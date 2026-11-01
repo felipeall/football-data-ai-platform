@@ -311,6 +311,7 @@ async def test_status_prints_the_loaded_releases_even_when_reep_fails(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    worker: str,
 ) -> None:
     files = _write_release(tmp_path)
     await load.load(reference, release.Manifest(RELEASE, _manifest(files)), _loaded(tmp_path))
@@ -319,7 +320,7 @@ async def test_status_prints_the_loaded_releases_even_when_reep_fails(
     monkeypatch.setattr(release, "client", lambda: reep_client(down))
     settings = Settings().model_copy(
         update={
-            "postgres_db": f"{Settings().postgres_db}_test",
+            "postgres_db": f"{Settings().postgres_db}_test{worker}",
             "reep": ReepSettings(release=RELEASE),
         }
     )
