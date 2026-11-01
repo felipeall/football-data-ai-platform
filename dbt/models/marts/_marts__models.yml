@@ -1,11 +1,220 @@
 version: 2
 
 models:
+  - name: players
+    description: >
+      Canonical Players (ADR 34) with their attributes: Transfermarkt's where the Player is
+      linked to it, else Sofascore's. Market value is the current one only, as of the latest
+      stored Transfermarkt response; there is no history. Every Player linked to a Source
+      Record is here, whatever the Seasons of their Appearances.
+    columns:
+      - name: player_id
+        data_tests: [unique, not_null]
+      - name: name
+        data_tests: [not_null]
+      - name: position
+        description: Transfermarkt's detailed position (`Left-Back`); null without a link.
+      - name: sofascore_position
+        description: Sofascore's position group (G, D, M, F).
+      - name: understat_position
+        description: >
+          The position (DL, DC, AMC…) the Player held most often in the Understat
+          Appearances they started in the covered Seasons. Substitutes show as `Sub` there,
+          so they are left out.
+      - name: current_club_id
+        description: >
+          Transfermarkt's current club, as a canonical Club; null when that club is not one
+          of ours (ADR 34 creates Clubs only for teams in stored Matches).
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('clubs')
+                field: club_id
+      - name: market_value_eur
+        description: Transfermarkt's current market value; null when it shows none.
+      - name: sofascore_player_id
+        data_tests: [unique]
+      - name: understat_player_id
+        data_tests: [unique]
+      - name: transfermarkt_player_id
+        data_tests: [unique]
+
+  - name: appearances
+    description: >
+      One row per Player and Match in the covered Seasons (`covered_seasons`, ADR 35), with
+      minutes and per-match statistics. Sofascore's Appearance and Understat's are joined
+      on the Player; counting statistics are Sofascore's, 0 when Sofascore leaves them out,
+      and null when only Understat holds the Appearance. A Source Record linked to no
+      Player is left out, and `warn_appearances_left_out_of_the_player_marts` lists it.
+    columns:
+      - name: appearance_id
+        data_tests: [unique, not_null]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('matches')
+                field: match_id
+      - name: player_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('players')
+                field: player_id
+      - name: club_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('clubs')
+                field: club_id
+      - name: season
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: "{{ var('covered_seasons') }}"
+      - name: minutes_played
+        description: Sofascore's minutes, else Understat's.
+        data_tests: [not_null]
+      - name: started
+        data_tests: [not_null]
+
+  - name: actions
+    description: >
+      Located Actions (passes, dribbles, ball carries, defensive actions) from Sofascore's
+      rating breakdowns, in the covered Seasons. Coordinates run 0-100: x from the Player's
+      own goal line towards the goal attacked, y from the right touchline to the left one.
+      A 404 for a rating breakdown means no Actions, not missing data. Actions have no
+      timestamps or order.
+    columns:
+      - name: action_id
+        data_tests: [unique, not_null]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('matches')
+                field: match_id
+      - name: player_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('players')
+                field: player_id
+      - name: club_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('clubs')
+                field: club_id
+      - name: season
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: "{{ var('covered_seasons') }}"
+      - name: category
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [passes, dribbles, ball-carries, defensive]
+      - name: action_type
+        data_tests: [not_null]
+      - name: outcome
+        description: Whether the Action succeeded; null for a ball carry.
+      - name: x
+        data_tests: [not_null]
+      - name: y
+        data_tests: [not_null]
+
+  - name: shots
+    description: >
+      Shots from Sofascore and Understat in the covered Seasons, one row per source Shot,
+      not merged across sources. Coordinates are in the Actions' frame. Own goals are left
+      out. `minute` is as each source gives it: Sofascore's minute of play (90 in added
+      time, with `added_time`), Understat's minutes elapsed.
+    columns:
+      - name: shot_id
+        data_tests: [unique, not_null]
+      - name: source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [sofascore, understat]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('matches')
+                field: match_id
+      - name: player_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('players')
+                field: player_id
+      - name: club_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('clubs')
+                field: club_id
+      - name: season
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: "{{ var('covered_seasons') }}"
+      - name: result
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [goal, saved, missed, post, blocked]
+      - name: situation
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [open-play, corner, set-piece, direct-free-kick, penalty]
+      - name: body_part
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [right-foot, left-foot, head, other]
+      - name: x
+        data_tests: [not_null]
+      - name: y
+        data_tests: [not_null]
+      - name: assisted_by_player_id
+        description: Understat's assister, when linked to a Player; Sofascore names none.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('players')
+                field: player_id
+
   - name: player_season_minutes
-    description: Appearances and minutes per Sofascore player and season.
+    description: Appearances and minutes per Player and Season, in the covered Seasons.
     columns:
       - name: player_season_id
         data_tests: [unique, not_null]
+      - name: player_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('players')
+                field: player_id
       - name: minutes_played
         data_tests: [not_null]
 

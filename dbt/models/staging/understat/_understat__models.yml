@@ -37,7 +37,9 @@ models:
         data_tests: [not_null]
 
   - name: stg_understat__shots
-    description: Understat Shots, with location and xG.
+    description: >
+      Understat Shots, with location and xG. The assister's ID comes from the shooting
+      team's roster for the Match, by the name Understat gives.
     columns:
       - name: shot_id
         data_tests: [unique, not_null]

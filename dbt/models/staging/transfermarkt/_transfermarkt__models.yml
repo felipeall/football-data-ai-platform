@@ -8,7 +8,9 @@ models:
         data_tests: [unique, not_null]
 
   - name: stg_transfermarkt__players
-    description: Transfermarkt players from the squad fan-out, with their current club.
+    description: >
+      Transfermarkt players from the squad fan-out, with their current club and market value
+      as of the latest response.
     columns:
       - name: player_id
         data_tests: [unique, not_null]
@@ -24,3 +26,9 @@ models:
         data_tests: [unique, not_null]
       - name: name
         data_tests: [not_null]
+
+  - name: stg_transfermarkt__countries
+    description: Transfermarkt's countries, from `/attributes`; clubs and players name theirs by ID.
+    columns:
+      - name: country_id
+        data_tests: [unique, not_null]

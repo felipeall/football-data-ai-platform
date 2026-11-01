@@ -1,20 +1,10 @@
 -- Transfermarkt clubs from the batched `/clubs` responses: a competition's clubs, and the
--- clubs in players' transfer histories. The country's name comes from `/attributes`.
+-- clubs in players' transfer histories, with their country's name.
 with clubs as (
     select club, responses.captured_at
     from {{ ref('base_transfermarkt__responses') }} as responses
     cross join lateral jsonb_array_elements(responses.body_json -> 'data') as club
     where responses.url ~ '^https://tmapi\.transfermarkt\.technology/clubs\?'
-),
-
-countries as (
-    select distinct on ((country ->> 'id')::int)
-        (country ->> 'id')::int as country_id,
-        country ->> 'name' as name
-    from {{ ref('base_transfermarkt__responses') }} as responses
-    cross join lateral jsonb_array_elements(responses.body_json -> 'data' -> 'countries') as country
-    where responses.url ~ '^https://tmapi\.transfermarkt\.technology/attributes$'
-    order by (country ->> 'id')::int, responses.captured_at desc
 )
 
 select distinct on ((clubs.club ->> 'id')::bigint)
@@ -25,6 +15,6 @@ select distinct on ((clubs.club ->> 'id')::bigint)
     (clubs.club -> 'baseDetails' ->> 'countryId')::int as country_id,
     countries.name as country
 from clubs
-left join countries
+left join {{ ref('stg_transfermarkt__countries') }} as countries
     on countries.country_id = (clubs.club -> 'baseDetails' ->> 'countryId')::int
 order by (clubs.club ->> 'id')::bigint, clubs.captured_at desc

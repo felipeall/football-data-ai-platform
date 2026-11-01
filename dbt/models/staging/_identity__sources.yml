@@ -6,6 +6,7 @@ sources:
       Canonical IDs and their links (ADR 31, ADR 34), owned by Alembic (ADR 29). The Club
       step and Identity Resolution write it; dbt reads it and never writes to it.
     tables:
+      - name: players
       - name: identity_candidates
       - name: clubs
       - name: club_aliases
