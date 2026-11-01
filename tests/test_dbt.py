@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import re
 import subprocess
@@ -28,6 +29,7 @@ from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
 from football_data_ai_platform.sources.understat import league as understat_league
 from football_data_ai_platform.transform.dbt import (
     CONNECTION_ERRORS,
+    FULL_PARSE,
     DbtActivities,
     lost_connection,
 )
@@ -438,7 +440,9 @@ async def test_the_player_marts_hold_the_covered_seasons_only(
     )
 
     # The Transform Run passes `COVERED_SEASON` to dbt.
-    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2024)
+    dbt = DbtActivities(
+        database_url, DBT_PROJECT, covered_season=2024, target_dir=tmp_path / "target"
+    )
     await ActivityEnvironment().run(dbt.build_dbt, ["--select", "appearances"])
     cursor = await connection.execute("SELECT season, count(*) FROM marts.appearances GROUP BY 1")
     assert await cursor.fetchall() == [(2024, 1)]
@@ -452,7 +456,9 @@ async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     bridges = [b for b in REEP_TEAM_BRIDGES if b[1:] != ("understat", str(CHELSEA))]
 
     result = await _create_clubs(connection, database_url, tmp_path, bridges)
-    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
+    dbt = DbtActivities(
+        database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / "target"
+    )
     await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
     build = await ActivityEnvironment().run(dbt.build_dbt, THE_REST)
 
@@ -692,7 +698,10 @@ async def test_identity_lists_only_the_unlinked_records_that_played_in_the_cover
     )
     await _create_clubs(connection, database_url, tmp_path)
     await ActivityEnvironment().run(
-        DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt, CLUBS_AND_MATCHES
+        DbtActivities(
+            database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / "target"
+        ).build_dbt,
+        CLUBS_AND_MATCHES,
     )
 
     async def unlinked(covered_season: int) -> list[tuple[str, int, int]]:
@@ -722,7 +731,10 @@ async def test_identity_lists_only_the_unlinked_records_that_played_in_the_cover
 
 
 async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
-    temporal: WorkflowEnvironment, connection: AsyncConnection[Any], database_url: str
+    temporal: WorkflowEnvironment,
+    connection: AsyncConnection[Any],
+    database_url: str,
+    tmp_path: Path,
 ) -> None:
     # Step 3 must not run a test of a model only step 4 builds (`match_id_aliases`).
     await connection.execute("DROP SCHEMA IF EXISTS staging, marts CASCADE")
@@ -735,7 +747,9 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
         task_queue=task_queue,
         workflows=[TransformWorkflow],
         activities=[
-            DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt,
+            DbtActivities(
+                database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / "target"
+            ).build_dbt,
             identity.create_clubs,
             identity.resolve_identities,
         ],
@@ -758,9 +772,11 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
 
 
 async def test_a_failed_dbt_test_fails_the_build_without_retries(
-    connection: AsyncConnection[Any], database_url: str
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
+    dbt = DbtActivities(
+        database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / "target"
+    )
     await _store_matches(connection)
     await ActivityEnvironment().run(dbt.build_dbt, STAGING)
     await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
@@ -786,9 +802,11 @@ async def test_a_failed_dbt_test_fails_the_build_without_retries(
 
 
 async def test_a_build_that_lost_its_database_connection_is_retried(
-    connection: AsyncConnection[Any], database_url: str
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
+    dbt = DbtActivities(
+        database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / "target"
+    )
     await _store_matches(connection)
     # Reading the Raw Responses ends the reader's own connection, as a Postgres restart would.
     await connection.execute("ALTER TABLE raw.raw_responses RENAME TO raw_responses_kept")
@@ -807,6 +825,30 @@ async def test_a_build_that_lost_its_database_connection_is_retried(
     assert "exited 1" in failure.value.message, failure.value.message
     assert not failure.value.non_retryable, failure.value.message
     assert "server closed the connection unexpectedly" in failure.value.message
+
+
+async def test_builds_in_one_target_directory_parse_the_project_once(
+    database_url: str, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    first, second = (
+        DbtActivities(database_url, DBT_PROJECT, covered_season=2025, target_dir=tmp_path / name)
+        for name in ("first", "second")
+    )
+    # A build of no model still parses the project.
+    nothing = ["--select", "no_such_model"]
+
+    async def full_parses(dbt: DbtActivities) -> list[str]:
+        caplog.clear()
+        await ActivityEnvironment().run(dbt.build_dbt, nothing)
+        return [r.getMessage() for r in caplog.records if FULL_PARSE in r.getMessage()]
+
+    assert len(await full_parses(first)) == 1
+    # The next step, or the next Transform Run, reuses the parse.
+    assert await full_parses(first) == []
+    # Another target directory shares none of it.
+    assert len(await full_parses(second)) == 1
+    assert (tmp_path / "second" / "partial_parse.msgpack").exists()
 
 
 def _results(*failures: tuple[str, str]) -> dict[str, Any]:

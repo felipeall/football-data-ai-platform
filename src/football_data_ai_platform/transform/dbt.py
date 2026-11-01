@@ -29,6 +29,8 @@ _CONNECTION_FAILED = re.compile(r"connection to server at .* failed")
 # A test that warns: `20 of 40 WARN 3 warn_matches_left_out_of_the_marts ... [WARN 3 in 0.05s]`.
 _WARNING = re.compile(r"^\d+ of \d+ WARN \d+ ")
 _TIME = re.compile(r"^\d\d:\d\d:\d\d\s+")
+# dbt's line when it parses the whole project: `Unable to do partial parsing because …`.
+FULL_PARSE = "Unable to do partial parsing"
 
 
 @dataclass(frozen=True)
@@ -40,10 +42,19 @@ class DbtBuildResult:
 class DbtActivities:
     """Runs `dbt build` on the project in `project_dir` against `database_url`'s database.
     `covered_season` (ADR 35), by its start year, is the dbt var `covered_seasons`: the
-    Season the Player marts hold."""
+    Season the Player marts hold.
+
+    Every build writes to `target_dir`, so dbt parses the project only when it changed
+    (partial parsing). One Transform Run at a time builds a database (ADR 31): give each
+    database its own `target_dir`, never one shared by concurrent builds."""
 
     def __init__(
-        self, database_url: str, project_dir: Path = Path("dbt"), *, covered_season: int
+        self,
+        database_url: str,
+        project_dir: Path = Path("dbt"),
+        *,
+        covered_season: int,
+        target_dir: Path,
     ) -> None:
         conninfo = conninfo_to_dict(database_url)
         self._env = {
@@ -55,6 +66,7 @@ class DbtActivities:
         }
         self._project_dir = project_dir.resolve()
         self._vars = json.dumps({"covered_seasons": [covered_season]})
+        self._target_dir = target_dir.resolve()
 
     @activity.defn
     async def build_dbt(self, selection: list[str]) -> DbtBuildResult:
@@ -71,10 +83,11 @@ class DbtActivities:
             self._vars,
         ]
         # The worker cannot write into the project in its image: target and logs go elsewhere.
-        with tempfile.TemporaryDirectory(prefix="dbt-") as scratch:
-            target = Path(scratch) / "target"
-            paths = ["--target-path", str(target), "--log-path", f"{scratch}/logs"]
-            # Only this build's results may decide a retry, even in a reused target directory.
+        # The target directory outlives the build, for partial parsing; the logs do not.
+        target = self._target_dir
+        with tempfile.TemporaryDirectory(prefix="dbt-logs-") as logs:
+            paths = ["--target-path", str(target), "--log-path", logs]
+            # Only this build's results may decide a retry, not the last build's.
             (target / "run_results.json").unlink(missing_ok=True)
             process = await asyncio.create_subprocess_exec(
                 Path(sys.executable).parent / "dbt",
@@ -100,6 +113,9 @@ class DbtActivities:
         # Without dbt's `HH:MM:SS` prefix.
         lines = [_TIME.sub("", line) for line in output.decode(errors="replace").splitlines()]
         tail = "\n".join(lines[-40:])
+        for line in lines:
+            if line.startswith(FULL_PARSE):
+                activity.logger.info("dbt: %s", line)
         if process.returncode != 0:
             raise ApplicationError(
                 f"dbt build {' '.join(selection)} exited {process.returncode}:\n{tail}",
@@ -112,6 +128,12 @@ class DbtActivities:
         summary = next((line for line in reversed(lines) if line.startswith("Done.")), "")
         activity.logger.info("dbt build %s: %s", " ".join(selection), summary)
         return DbtBuildResult(summary, warnings)
+
+
+def dbt_target_dir(database_url: str) -> Path:
+    """The worker's dbt target directory: one per database, in the temporary directory,
+    since the worker's image keeps the project read-only. A new container starts it empty."""
+    return Path(tempfile.gettempdir()) / f"dbt-target-{conninfo_to_dict(database_url)['dbname']}"
 
 
 def _read_run_results(path: Path) -> dict[str, Any] | None:

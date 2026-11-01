@@ -32,7 +32,7 @@ from football_data_ai_platform.sources.sofascore.captcha import (
     camoufox_solver,
 )
 from football_data_ai_platform.sources.transfermarkt import SOURCE, is_upstream_failure
-from football_data_ai_platform.transform.dbt import DbtActivities
+from football_data_ai_platform.transform.dbt import DbtActivities, dbt_target_dir
 from football_data_ai_platform.transform.workflows import TransformWorkflow
 
 
@@ -58,7 +58,11 @@ async def run_worker(settings: Settings) -> None:
     identity = IdentityActivities(
         settings.database_url, settings.reep.release, covered_season=settings.covered_season
     )
-    dbt = DbtActivities(settings.database_url, covered_season=settings.covered_season)
+    dbt = DbtActivities(
+        settings.database_url,
+        covered_season=settings.covered_season,
+        target_dir=dbt_target_dir(settings.database_url),
+    )
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
