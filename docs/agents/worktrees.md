@@ -36,7 +36,7 @@ Report live numbers from the worktree database, and name it in the issue comment
 
 ## The live database
 
-Live moves forward only from `main`: after a pull request merges, the main checkout runs `docker compose up --wait`, whose `migrate` service applies new migrations. Start, stop and rebuild the stack from the main checkout only.
+Live moves forward only from `main`: after a pull request merges, the main checkout pulls `main` and runs `docker compose up --wait --build`: `--build` rebuilds the `worker` and `migrate` images from the merged code (without it, Compose reuses the old images), and `migrate` applies new migrations. Start, stop and rebuild the stack from the main checkout only.
 
 ## Work in progress
 
