@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from contextlib import suppress
@@ -24,7 +25,9 @@ from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
 DBT_PROJECT = Path(__file__).parent.parent / "dbt"
 
 
-def _dbt_build(database_url: str, tmp_path: Path) -> None:
+def _dbt_build(
+    database_url: str, tmp_path: Path, *, succeeds: bool = True
+) -> subprocess.CompletedProcess[str]:
     """`dbt build` against the test database, as a subprocess, as it runs from the CLI."""
     conninfo = conninfo_to_dict(database_url)
     env = os.environ | {
@@ -35,12 +38,13 @@ def _dbt_build(database_url: str, tmp_path: Path) -> None:
         "POSTGRES_PASSWORD": str(conninfo.get("password", "")),
     }
     dbt = Path(sys.executable).parent / "dbt"
-    args = ["--project-dir", DBT_PROJECT, "--profiles-dir", DBT_PROJECT]
+    args = ["--no-use-colors", "--project-dir", DBT_PROJECT, "--profiles-dir", DBT_PROJECT]
     paths = ["--target-path", tmp_path / "target", "--log-path", tmp_path / "logs"]
     result = subprocess.run(
         [dbt, "build", *args, *paths], env=env, capture_output=True, text=True, check=False
     )
-    assert result.returncode == 0, result.stdout[-4000:]
+    assert (result.returncode == 0) == succeeds, result.stdout[-4000:]
+    return result
 
 
 async def _store_matches(connection: AsyncConnection[Any]) -> None:
@@ -236,3 +240,45 @@ async def test_dbt_never_writes_to_the_schemas_alembic_owns(
     _dbt_build(database_url, tmp_path)
 
     assert await (await connection.execute(owned)).fetchall() == before
+
+
+async def test_dbt_fails_when_a_candidate_s_source_record_is_not_staged(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    # #74: a whole season's Raw Responses were deleted, and 252 Players kept links to
+    # Sofascore records no lineup held any more. The build must say so.
+    await _store_matches(connection)
+    recording = understat.recording_transport(
+        UnderstatStub().transport(), RawResponseStore(connection), FetchAttemptStore(connection)
+    )
+    await understat_league.fetch_league_season(recording, LEAGUE, 2024)
+    await understat_league.fetch_match(recording, 1)
+    # Sofascore 11 and Understat 801 are in stored Matches; no stored response holds 999.
+    candidates = [
+        ("sofascore", "11"),
+        ("sofascore", "999"),
+        ("understat", "801"),
+        ("understat", "999"),
+        ("transfermarkt", "999"),
+    ]
+    for source, source_record_id in candidates:
+        cursor = await connection.execute(
+            "INSERT INTO identity.players DEFAULT VALUES RETURNING player_id"
+        )
+        row = await cursor.fetchone()
+        assert row is not None
+        await connection.execute(
+            "INSERT INTO identity.identity_candidates"
+            " (source, source_record_id, player_id, method, confidence, status)"
+            " VALUES (%s, %s, %s, 'test', 1, 'pending')",
+            (source, source_record_id, row[0]),
+        )
+
+    result = _dbt_build(database_url, tmp_path, succeeds=False)
+
+    # Only this test fails, and only for the three records no stored response holds.
+    assert "ERROR=1 " in result.stdout, result.stdout[-4000:]
+    assert re.search(
+        r"in test assert_identity_candidates_have_staged_source_records .*\n.*Got 3 results,",
+        result.stdout,
+    ), result.stdout[-4000:]

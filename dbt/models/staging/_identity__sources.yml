@@ -1,0 +1,9 @@
+version: 2
+
+sources:
+  - name: identity
+    description: >
+      Players and their Identity Candidates, written by Identity Resolution and owned by
+      Alembic (ADR 31). dbt reads them and never writes to them.
+    tables:
+      - name: identity_candidates

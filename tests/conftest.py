@@ -41,9 +41,12 @@ def database_url() -> Iterator[str]:
 
 @pytest.fixture
 async def connection(database_url: str) -> AsyncIterator[AsyncConnection[Any]]:
-    """An autocommit connection to empty `raw.raw_responses` and `raw.fetch_attempts`."""
+    """An autocommit connection to empty Raw Responses, Fetch Attempts, Players and Identity
+    Candidates. A Candidate left by one test would point at a record the next one's staging
+    lacks, and fail dbt's check that staging holds every Candidate's Source Record."""
     async with await AsyncConnection.connect(database_url, autocommit=True) as conn:
         await conn.execute("TRUNCATE raw.raw_responses, raw.fetch_attempts")
+        await conn.execute("TRUNCATE identity.identity_candidates, identity.players")
         yield conn
 
 
