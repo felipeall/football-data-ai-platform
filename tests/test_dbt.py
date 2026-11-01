@@ -19,7 +19,7 @@ from football_intel.sources.sofascore.matches import MatchNotFinished, fetch_mat
 from football_intel.sources.transfermarkt.squads import fetch_squad
 from football_intel.sources.understat import league as understat_league
 from tests.sofascore_stub import NOT_STARTED_EVENT_ID, SofascoreStub
-from tests.transfermarkt_stub import CLUB_ID, PLAYERS, TransfermarktStub
+from tests.transfermarkt_stub import CLUB_ID, PLAYERS, SEASON_ID, TransfermarktStub
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
 
 DBT_PROJECT = Path(__file__).parent.parent / "dbt"
@@ -253,12 +253,23 @@ async def test_dbt_fails_when_a_candidate_s_source_record_is_not_staged(
     )
     await understat_league.fetch_league_season(recording, LEAGUE, 2024)
     await understat_league.fetch_match(recording, 1)
-    # Sofascore 11 and Understat 801 are in stored Matches; no stored response holds 999.
+    await fetch_squad(
+        transfermarkt.recording_transport(
+            TransfermarktStub().transport(),
+            RawResponseStore(connection),
+            FetchAttemptStore(connection),
+        ),
+        CLUB_ID,
+        SEASON_ID,
+    )
+    # Sofascore 11, Understat 801 and Transfermarkt 101 are in stored responses; none
+    # holds 999.
     candidates = [
         ("sofascore", "11"),
         ("sofascore", "999"),
         ("understat", "801"),
         ("understat", "999"),
+        ("transfermarkt", "101"),
         ("transfermarkt", "999"),
     ]
     for source, source_record_id in candidates:
