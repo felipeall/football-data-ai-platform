@@ -11,6 +11,7 @@ select
     (event -> 'tournament' -> 'uniqueTournament' ->> 'id')::bigint as tournament_id,
     (event -> 'season' ->> 'id')::bigint as season_id,
     event -> 'season' ->> 'year' as season_year,
+    (event -> 'roundInfo' ->> 'round')::int as round,
     to_timestamp((event ->> 'startTimestamp')::bigint) as kickoff_at,
     (event -> 'homeTeam' ->> 'id')::bigint as home_team_id,
     event -> 'homeTeam' ->> 'name' as home_team_name,

@@ -16,7 +16,7 @@ FIXTURES: dict[int, list[tuple[int, bool]]] = {
     2025: [(4, True)],
 }
 MISSING_MATCH_ID = 2
-# Understat team IDs of real clubs, so the club seed maps them: Arsenal (83) and Chelsea
+# Understat team IDs of real clubs: Arsenal (83) and Chelsea
 # (80), each at home once in 2024.
 ARSENAL, CHELSEA = 83, 80
 MATCH_TEAMS = {

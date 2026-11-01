@@ -1,4 +1,4 @@
-"""Player names, compared across sources."""
+"""Names, compared across sources."""
 
 import re
 import unicodedata
@@ -11,14 +11,18 @@ _TRANSLITERATIONS = str.maketrans(
 )
 
 
-def normalize(name: str) -> str:
-    """Lower case ASCII words: accents and punctuation removed, hyphens split."""
-    ascii_name = (
+def to_ascii(name: str) -> str:
+    """`name` transliterated to ASCII: accents removed, other letters spelled out."""
+    return (
         unicodedata.normalize("NFKD", name.translate(_TRANSLITERATIONS))
         .encode("ascii", "ignore")
         .decode()
     )
-    return " ".join(re.sub(r"[^a-z ]+", " ", ascii_name.lower()).split())
+
+
+def normalize(name: str) -> str:
+    """Lower case ASCII words: accents and punctuation removed, hyphens split."""
+    return " ".join(re.sub(r"[^a-z ]+", " ", to_ascii(name).lower()).split())
 
 
 def similarity(a: str, b: str) -> float:

@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import subprocess
@@ -11,22 +12,26 @@ import httpx
 import pytest
 from psycopg import AsyncConnection
 from psycopg.conninfo import conninfo_to_dict
+from psycopg.types.json import Jsonb
+from temporalio.testing import ActivityEnvironment
 
 from football_intel.fetch_attempts import FetchAttemptStore
+from football_intel.identity.activities import ClubResult, IdentityActivities
+from football_intel.identity.store import ClubStore
 from football_intel.raw_responses import RawResponseStore
 from football_intel.sources import sofascore, transfermarkt, understat
 from football_intel.sources.sofascore.matches import MatchNotFinished, fetch_match
 from football_intel.sources.transfermarkt.squads import fetch_squad
 from football_intel.sources.understat import league as understat_league
 from tests.sofascore_stub import NOT_STARTED_EVENT_ID, SofascoreStub
-from tests.transfermarkt_stub import CLUB_ID, PLAYERS, SEASON_ID, TransfermarktStub
+from tests.transfermarkt_stub import ATTRIBUTES, CLUB_ID, PLAYERS, SEASON_ID, TransfermarktStub
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
 
 DBT_PROJECT = Path(__file__).parent.parent / "dbt"
 
 
 def _dbt_build(
-    database_url: str, tmp_path: Path, *, succeeds: bool = True
+    database_url: str, tmp_path: Path, *selection: str, succeeds: bool = True
 ) -> subprocess.CompletedProcess[str]:
     """`dbt build` against the test database, as a subprocess, as it runs from the CLI."""
     conninfo = conninfo_to_dict(database_url)
@@ -41,7 +46,11 @@ def _dbt_build(
     args = ["--no-use-colors", "--project-dir", DBT_PROJECT, "--profiles-dir", DBT_PROJECT]
     paths = ["--target-path", tmp_path / "target", "--log-path", tmp_path / "logs"]
     result = subprocess.run(
-        [dbt, "build", *args, *paths], env=env, capture_output=True, text=True, check=False
+        [dbt, "build", *args, *paths, *selection],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     assert (result.returncode == 0) == succeeds, result.stdout[-4000:]
     return result
@@ -141,27 +150,218 @@ async def test_dbt_builds_understat_matches_appearances_and_shots(
     ]
 
 
-async def test_dbt_links_matches_across_sources_by_season_and_clubs(
-    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
-) -> None:
-    await _store_matches(connection)
+# Made-up Reep teams bridging the stubs' teams (ADR 4): Arsenal is Sofascore 42, Understat
+# 83 and Transfermarkt 11; Chelsea is Sofascore 38, Understat 80 and Transfermarkt 631.
+REEP_TEAM_BRIDGES = [
+    ("rt-arsenal", "sofascore", "42"),
+    ("rt-arsenal", "understat", str(ARSENAL)),
+    ("rt-arsenal", "transfermarkt", "11"),
+    ("rt-chelsea", "sofascore", "38"),
+    ("rt-chelsea", "understat", str(CHELSEA)),
+    ("rt-chelsea", "transfermarkt", "631"),
+]
+TRANSFERMARKT_CLUBS = [
+    {"id": "11", "name": "Arsenal FC", "baseDetails": {"shortName": "Arsenal", "countryId": 1}},
+    {"id": "631", "name": "Chelsea FC", "baseDetails": {"shortName": "", "countryId": 1}},
+]
+TM_API = "https://tmapi.transfermarkt.technology"
+
+
+async def _store_json(connection: AsyncConnection[Any], source: str, url: str, body: Any) -> None:
+    await connection.execute(
+        "INSERT INTO raw.raw_responses (source, method, url, status_code, headers, body,"
+        " body_json, captured_at) VALUES (%s, 'GET', %s, 200, '{}', %s, %s, now())",
+        (source, url, json.dumps(body).encode(), Jsonb(body)),
+    )
+
+
+async def _create_clubs(
+    connection: AsyncConnection[Any],
+    database_url: str,
+    tmp_path: Path,
+    bridges: list[tuple[str, str, str]] = REEP_TEAM_BRIDGES,
+) -> ClubResult:
+    """Steps 1 and 2 of the Transform Run: dbt staging, then the Club step, from a made-up
+    Reep release and Transfermarkt's club names."""
+    await connection.execute("DELETE FROM reference.reep_releases WHERE release = 'test'")
+    await connection.execute(
+        "INSERT INTO reference.reep_releases (release, manifest) VALUES ('test', '{}')"
+    )
+    for reep_id, provider, external_id in bridges:
+        await connection.execute(
+            "INSERT INTO reference.reep_team_bridges (release, reep_id, provider, external_id)"
+            " VALUES ('test', %s, %s, %s)",
+            (reep_id, provider, external_id),
+        )
+    await _store_json(
+        connection,
+        "transfermarkt",
+        f"{TM_API}/clubs?ids%5B%5D=11&ids%5B%5D=631",
+        {"success": True, "data": TRANSFERMARKT_CLUBS},
+    )
+    await _store_json(connection, "transfermarkt", f"{TM_API}/attributes", {"data": ATTRIBUTES})
+    _dbt_build(database_url, tmp_path, "--select", "staging")
+    return await ActivityEnvironment().run(IdentityActivities(database_url, "test").create_clubs)
+
+
+# The stub's events all kick off on 1 January; these are Understat's kickoffs of the same
+# fixtures, so the two sides of a Match agree, as they do live.
+KICKOFFS = {1001: "2025-01-01 15:00Z", 1003: "2025-01-02 15:00Z"}
+
+
+async def _kick_off(connection: AsyncConnection[Any], event_id: int, at: str) -> None:
+    await connection.execute(
+        "UPDATE raw.raw_responses SET body_json = jsonb_set(body_json,"
+        " '{event,startTimestamp}', to_jsonb(extract(epoch FROM %s::timestamptz)::bigint))"
+        " WHERE url LIKE %s",
+        (at, f"%/event/{event_id}"),
+    )
+
+
+async def _store_both_sources(connection: AsyncConnection[Any], *event_ids: int) -> None:
+    stub = SofascoreStub()
+    recording = sofascore.recording_transport(
+        stub.transport(), RawResponseStore(connection), FetchAttemptStore(connection)
+    )
+    for event_id in event_ids:
+        await fetch_match(recording, event_id, per_player=False)
+        await _kick_off(connection, event_id, KICKOFFS[event_id])
     recording = understat.recording_transport(
         UnderstatStub().transport(), RawResponseStore(connection), FetchAttemptStore(connection)
     )
     await understat_league.fetch_league_season(recording, LEAGUE, 2024)
 
+
+async def test_dbt_links_matches_across_sources_by_competition_season_and_clubs(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, 1003)
+
+    result = await _create_clubs(connection, database_url, tmp_path)
+    _dbt_build(database_url, tmp_path)
+
+    assert (result.created, result.links_added, result.unresolved) == (
+        ["arsenal", "chelsea"],
+        8,
+        [],
+    )
+    cursor = await connection.execute(
+        "SELECT club_id, display_name, country, sofascore_team_id, understat_team_id,"
+        " transfermarkt_club_id, reep_team_id FROM marts.clubs ORDER BY club_id"
+    )
+    # Chelsea's short name is empty, so it is displayed by its full name.
+    assert await cursor.fetchall() == [
+        ("arsenal", "Arsenal", "Testland", 42, ARSENAL, 11, "rt-arsenal"),
+        ("chelsea", "Chelsea FC", "Testland", 38, CHELSEA, 631, "rt-chelsea"),
+    ]
+    cursor = await connection.execute(
+        "SELECT match_id, round, sofascore_match_id, understat_match_id FROM marts.matches"
+        " ORDER BY match_id"
+    )
+    # Sofascore names the season "24/25", Understat 2024; their team IDs differ. The Clubs,
+    # the Competition and the season link them, so each fixture is one Match with both IDs.
+    assert await cursor.fetchall() == [
+        ("premier-league:2024:league:arsenal:chelsea", 1, 1001, 1),
+        ("premier-league:2024:league:chelsea:arsenal", 3, 1003, 2),
+    ]
+
+    # A re-run creates nothing and changes nothing.
+    again = await ActivityEnvironment().run(IdentityActivities(database_url, "test").create_clubs)
+    assert (again.created, again.links_added, again.clubs) == ([], 0, 2)
+
+
+async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, 1003)
+    # Reep bridges Chelsea's Sofascore team only, not its Understat team.
+    bridges = [b for b in REEP_TEAM_BRIDGES if b[1:] != ("understat", str(CHELSEA))]
+
+    result = await _create_clubs(connection, database_url, tmp_path, bridges)
+    build = _dbt_build(database_url, tmp_path)
+
+    assert [(t.provider, t.external_id) for t in result.unresolved] == [("understat", str(CHELSEA))]
+    cursor = await connection.execute(
+        "SELECT match_id, sofascore_match_id, understat_match_id FROM marts.matches"
+        " ORDER BY match_id"
+    )
+    assert await cursor.fetchall() == [
+        ("premier-league:2024:league:arsenal:chelsea", 1001, None),
+        ("premier-league:2024:league:chelsea:arsenal", 1003, None),
+    ]
+    assert any(
+        "WARN 2 warn_matches_left_out_of_the_marts" in line for line in build.stdout.splitlines()
+    ), build.stdout[-4000:]
+
+
+async def test_a_renamed_clubs_former_match_ids_still_resolve(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001)
+    await _create_clubs(connection, database_url, tmp_path)
+
+    await ClubStore(connection).rename("arsenal", "the-arsenal")
     _dbt_build(database_url, tmp_path)
 
     cursor = await connection.execute(
-        "SELECT match_id, season, home_club_id, away_club_id, sofascore_match_id,"
-        " understat_match_id FROM marts.matches ORDER BY match_id"
+        "SELECT alias, match_id FROM marts.match_id_aliases ORDER BY alias"
     )
-    # Sofascore names the season "24/25", Understat 2024; their team IDs differ. The Clubs
-    # and the season link them, so each fixture is one Match with both IDs.
     assert await cursor.fetchall() == [
-        ("2024:arsenal:chelsea", 2024, "arsenal", "chelsea", 1001, 1),
-        ("2024:chelsea:arsenal", 2024, "chelsea", "arsenal", 1003, 2),
+        (
+            "premier-league:2024:league:arsenal:chelsea",
+            "premier-league:2024:league:the-arsenal:chelsea",
+        ),
+        (
+            "premier-league:2024:league:chelsea:arsenal",
+            "premier-league:2024:league:chelsea:the-arsenal",
+        ),
     ]
+
+
+async def test_a_stage_link_names_the_stage_of_a_paired_match(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, 1003)
+    await connection.execute(
+        "INSERT INTO identity.stages (competition_id, stage_id, name)"
+        " VALUES ('premier-league', 'run-in', 'Run-in')"
+    )
+    await connection.execute(
+        "INSERT INTO identity.stage_links (competition_id, stage_id, provider, first_round,"
+        " last_round) VALUES ('premier-league', 'run-in', 'sofascore', 3, 38)"
+    )
+    try:
+        await _create_clubs(connection, database_url, tmp_path)
+        _dbt_build(database_url, tmp_path)
+
+        cursor = await connection.execute(
+            "SELECT match_id, sofascore_match_id, understat_match_id FROM marts.matches"
+            " ORDER BY match_id"
+        )
+        # Understat has no round, so Match 2 takes its Stage from the Sofascore side.
+        assert await cursor.fetchall() == [
+            ("premier-league:2024:league:arsenal:chelsea", 1001, 1),
+            ("premier-league:2024:run-in:chelsea:arsenal", 1003, 2),
+        ]
+    finally:
+        await connection.execute("DELETE FROM identity.stage_links")
+        await connection.execute("DELETE FROM identity.stages WHERE stage_id = 'run-in'")
+
+
+async def test_dbt_fails_when_one_fixture_is_two_matches_with_home_and_away_swapped(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    # Sofascore has Chelsea v Arsenal on 1 January, paired with Understat's Match 2. Understat
+    # also has Arsenal v Chelsea on 1 January (Match 1): the same fixture, sides swapped.
+    await _store_both_sources(connection, 1003)
+    await _kick_off(connection, 1003, KICKOFFS[1001])
+    await _create_clubs(connection, database_url, tmp_path)
+
+    build = _dbt_build(database_url, tmp_path, succeeds=False)
+
+    failures = [line for line in build.stdout.splitlines() if " FAIL " in line]
+    assert len(failures) == 1, build.stdout[-4000:]
+    assert "assert_no_fixture_recorded_twice" in failures[0]
 
 
 SQUADS_BY_SEASON = {"2025": ("101", "102"), "2024": ("101", "103")}

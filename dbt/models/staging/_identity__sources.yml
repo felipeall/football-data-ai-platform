@@ -3,7 +3,14 @@ version: 2
 sources:
   - name: identity
     description: >
-      Players and their Identity Candidates, written by Identity Resolution and owned by
-      Alembic (ADR 31). dbt reads them and never writes to them.
+      Canonical IDs and their links (ADR 31, ADR 34), owned by Alembic (ADR 29). The Club
+      step and Identity Resolution write it; dbt reads it and never writes to it.
     tables:
       - name: identity_candidates
+      - name: clubs
+      - name: club_aliases
+      - name: club_links
+      - name: competitions
+      - name: competition_links
+      - name: stages
+      - name: stage_links
