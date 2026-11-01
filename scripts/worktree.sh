@@ -20,7 +20,8 @@ if [[ "$worktree" == "$main" ]]; then
 fi
 
 # Postgres truncates names at 63 bytes. 29 + 19 leaves 15 for suffixes a test adds to
-# the database name (`_test` from tests/conftest.py, then a migration test's own).
+# the database name (`_test` from tests/conftest.py, or a migration test's `_0008`,
+# then the pytest-xdist worker's number).
 # The slug is the folder name's first 13 characters plus 5 of its hash, so two
 # folders that start alike still get their own database and task queue.
 folder=$(basename "$worktree")
@@ -96,8 +97,13 @@ case "${1:-}" in
     teardown)
         if postgres_up; then
             psql_live "-c 'drop database if exists $database with (force)'"
-            psql_live "-c 'drop database if exists ${database}_test with (force)'"
-            echo "Dropped $database and ${database}_test"
+            # The test databases: one per pytest-xdist worker, see tests/conftest.py.
+            compose exec -T -e PGOPTIONS="-c client_min_messages=warning" postgres sh -c \
+                "psql -v ON_ERROR_STOP=1 -q -U \"\$POSTGRES_USER\" -d \"\$POSTGRES_DB\"" <<SQL
+select format('drop database if exists %I with (force)', datname) from pg_database
+where datname ~ '^${database}_(test|0008)[0-9]*\$' \gexec
+SQL
+            echo "Dropped $database and its test databases"
         fi
         ;;
     *)

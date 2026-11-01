@@ -19,7 +19,9 @@ It does four things:
 
 ## Tests
 
-`uv run pytest` builds `<worktree database>_test`, so parallel worktrees each get their own test database. The main checkout's tests use `football_data_ai_platform_test`.
+`uv run pytest` runs the tests in parallel with pytest-xdist, one worker per CPU, and each worker builds its own test database, `<worktree database>_test<n>` for worker `gw<n>`. Parallel worktrees, and the workers within one, never share a test database; the main checkout's are `football_data_ai_platform_test<n>`. `uv run pytest -n0` runs serially in one process, against `<worktree database>_test`, for a debugger or `-s`.
+
+A test that creates its own database appends the `worker` fixture's number to its name, as `tests/conftest.py` and the `0008` migration test do.
 
 ## Live checks
 
