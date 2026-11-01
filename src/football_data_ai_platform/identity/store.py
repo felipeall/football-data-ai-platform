@@ -1,12 +1,14 @@
 """The `identity` schema: Players, Identity Candidates and Clubs (ADR 31, ADR 34)."""
 
 from collections.abc import Iterable
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, LiteralString
 
 from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 
 from football_data_ai_platform.identity.clubs import SLUG, ClubPlan, LinkKey
+from football_data_ai_platform.identity.judge import LLM_JUDGE, Verdict, status_after
 from football_data_ai_platform.identity.rules import Method, Proposal, RecordKey
 
 
@@ -34,10 +36,12 @@ class IdentityStore:
         is then left out:
 
         - a record whose only Candidates are rejected Reep links, unless
-          `reopen_rejected_reep` is False, so the rules can link it once a reviewer rejects
-          a wrong Reep link (ADR 32);
+          `reopen_rejected_reep` is False, so the rules can link it once the judge or a
+          reviewer rejects a wrong Reep link (ADR 32);
         - a record whose only Candidates are rejected creation checks, or those and rejected
           Reep links, so it can create its own Player (ADR 39).
+
+        A judged Candidate keeps the method that proposed it in its evidence.
         """
         reopening = [Method.CREATION_CHECK]
         if reopen_rejected_reep:
@@ -46,7 +50,9 @@ class IdentityStore:
             """
             SELECT source, source_record_id::bigint FROM identity.identity_candidates
             GROUP BY source, source_record_id
-            HAVING bool_or(NOT (method = ANY(%s) AND status = 'rejected'))
+            HAVING bool_or(NOT (
+                coalesce(evidence->>'proposed_method', method) = ANY(%s) AND status = 'rejected'
+            ))
             """,
             (reopening,),
         )
@@ -70,7 +76,7 @@ class IdentityStore:
         cursor = await self._connection.execute(
             """
             SELECT source, source_record_id::bigint FROM identity.identity_candidates
-            WHERE method = %s AND status = 'pending'
+            WHERE coalesce(evidence->>'proposed_method', method) = %s AND status = 'pending'
             """,
             (Method.CREATION_CHECK,),
         )
@@ -128,6 +134,162 @@ class IdentityStore:
             stored += 1
         return stored, len(created)
 
+    async def candidate(self, candidate_id: int) -> "StoredCandidate | None":
+        """One Candidate, locked for the rest of the transaction."""
+        cursor = await self._connection.execute(
+            f"{_CANDIDATES} WHERE candidate_id = %s FOR UPDATE", (candidate_id,)
+        )
+        row = await cursor.fetchone()
+        return None if row is None else StoredCandidate(*row)
+
+    async def pending(self) -> "list[StoredCandidate]":
+        """The pending Candidates, judged or not: what awaits the judge or a reviewer."""
+        cursor = await self._connection.execute(
+            f"{_CANDIDATES} WHERE status = 'pending' ORDER BY candidate_id"
+        )
+        return [StoredCandidate(*row) for row in await cursor.fetchall()]
+
+    async def record_verdict(
+        self, candidate_id: int, verdict: Verdict, model: str, trace_id: str | None
+    ) -> "StoredCandidate | None":
+        """Store the judge's verdict on a pending Candidate it has not answered yet: its
+        method becomes `llm_judge`, and the proposing method and score move to its evidence.
+        It is accepted or rejected only when the judge is sure (`status_after`), and an
+        accept that would give a record or a Player a second link stays pending, with the
+        reason. Returns the Candidate as stored, or None when it was no longer judgeable."""
+        candidate = await self.candidate(candidate_id)
+        if candidate is None or candidate.status != "pending" or candidate.method == LLM_JUDGE:
+            return None
+        status = status_after(verdict)
+        conflict = await self._link_conflict(candidate) if status == "accepted" else None
+        if conflict is not None:
+            status = "pending"
+        judgement = {
+            "decision": verdict.decision,
+            "confidence": verdict.confidence,
+            "reasoning": verdict.reasoning,
+            "model": model,
+            "trace_id": trace_id,
+        }
+        if conflict is not None:
+            judgement["not_applied"] = conflict
+        evidence = {
+            **candidate.evidence,
+            "proposed_method": candidate.method,
+            "proposed_confidence": candidate.confidence,
+            "judge": judgement,
+        }
+        return await self._decide(
+            candidate_id,
+            LLM_JUDGE,
+            _link_confidence(verdict, candidate.confidence),
+            status,
+            evidence,
+            f"{LLM_JUDGE}:{model}",
+        )
+
+    async def review(
+        self, candidate_id: int, approve: bool, reviewer: str, note: str | None = None
+    ) -> tuple["StoredCandidate | None", str | None]:
+        """A reviewer accepts or rejects a Candidate, whatever its status: a pending one, a
+        judge's decision, or an accepted link. Rejecting a Reep link reopens its record to
+        the rules (ADR 32). The method stays the one that proposed it.
+
+        Returns the Candidate as stored, and why nothing changed when nothing did."""
+        candidate = await self.candidate(candidate_id)
+        if candidate is None:
+            return None, f"no Candidate {candidate_id}"
+        status = "accepted" if approve else "rejected"
+        if candidate.status == status:
+            return candidate, f"Candidate {candidate_id} is already {status}"
+        if approve and (conflict := await self._link_conflict(candidate)) is not None:
+            return candidate, conflict
+        evidence = {
+            **candidate.evidence,
+            "review": {
+                "decision": "approve" if approve else "reject",
+                "reviewer": reviewer,
+                "note": note,
+                "previous_status": candidate.status,
+            },
+        }
+        stored = await self._decide(
+            candidate_id,
+            candidate.method,
+            candidate.confidence,
+            status,
+            evidence,
+            f"reviewer:{reviewer}",
+        )
+        return stored, None
+
+    async def _decide(
+        self,
+        candidate_id: int,
+        method: str,
+        confidence: float,
+        status: str,
+        evidence: dict[str, Any],
+        decided_by: str,
+    ) -> "StoredCandidate":
+        cursor = await self._connection.execute(
+            """
+            UPDATE identity.identity_candidates
+            SET method = %(method)s, confidence = %(confidence)s, status = %(status)s,
+                evidence = %(evidence)s,
+                decided_at = CASE WHEN %(status)s = 'pending' THEN NULL ELSE now() END,
+                decided_by = CASE WHEN %(status)s = 'pending' THEN NULL ELSE %(by)s END
+            WHERE candidate_id = %(id)s
+            RETURNING candidate_id
+            """,
+            {
+                "method": method,
+                "confidence": confidence,
+                "status": status,
+                "evidence": Jsonb(evidence),
+                "by": decided_by,
+                "id": candidate_id,
+            },
+        )
+        assert await cursor.fetchone() is not None
+        stored = await self.candidate(candidate_id)
+        assert stored is not None
+        return stored
+
+    async def _link_conflict(self, candidate: "StoredCandidate") -> str | None:
+        """Why accepting the Candidate would break one link per record or per Player and
+        source; None when it would not."""
+        cursor = await self._connection.execute(
+            """
+            SELECT 'record', player_id::text FROM identity.identity_candidates
+            WHERE source = %(source)s AND source_record_id = %(record)s
+                AND status = 'accepted' AND candidate_id <> %(id)s
+            UNION ALL
+            SELECT 'player', source_record_id FROM identity.identity_candidates
+            WHERE player_id = %(player)s AND source = %(source)s
+                AND status = 'accepted' AND candidate_id <> %(id)s
+            """,
+            {
+                "source": candidate.source,
+                "record": str(candidate.source_record_id),
+                "player": candidate.player_id,
+                "id": candidate.candidate_id,
+            },
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        kind, other = row
+        if kind == "record":
+            return (
+                f"{candidate.source} {candidate.source_record_id} already links to Player"
+                f" {other}; reject that link first"
+            )
+        return (
+            f"Player {candidate.player_id} already links to {candidate.source} {other};"
+            " reject that link first"
+        )
+
     async def counts(self) -> list[tuple[str, str, str, int]]:
         """Candidates by source, method and status."""
         cursor = await self._connection.execute(
@@ -177,6 +339,36 @@ class IdentityStore:
             ),
         )
         return cursor.rowcount == 1
+
+
+@dataclass(frozen=True)
+class StoredCandidate:
+    candidate_id: int
+    source: str
+    source_record_id: int
+    player_id: int
+    method: str
+    confidence: float
+    status: str
+    evidence: dict[str, Any]
+    decided_by: str | None
+
+
+_CANDIDATES: LiteralString = """
+    SELECT candidate_id, source, source_record_id::bigint, player_id, method,
+        confidence::float, status, evidence, decided_by
+    FROM identity.identity_candidates
+"""
+
+
+def _link_confidence(verdict: Verdict, proposed: float) -> float:
+    """How likely the link is right, after the verdict: the judge's confidence in an
+    accept, its complement for a reject; a deferral keeps the proposal's score."""
+    if verdict.decision == "accept":
+        return verdict.confidence
+    if verdict.decision == "reject":
+        return round(1 - verdict.confidence, 3)
+    return proposed
 
 
 class ClubTaken(Exception):

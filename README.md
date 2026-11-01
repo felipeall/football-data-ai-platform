@@ -114,6 +114,7 @@ flowchart TD
 - **Competitions and Stages** are entered by hand when we take one on. **Clubs** are created from Reep's team bridges and named after their Transfermarkt club (`brighton-and-hove-albion`). **Matches** are linked by Competition, season, home Club and away Club.
 - Sofascore and Understat only link to Players; they never create one. A link our own data contradicts, such as a birth date that disagrees, waits for review instead of being trusted.
 - Every link is an Identity Candidate with its method, confidence and evidence, so a wrong one can be traced and rejected.
+- **The ambiguous band** is what the rules leave pending. `fdap judge` asks the LLM judge (Claude Haiku 5.5 through the `identity_judge` Model Role, traced in Langfuse) about each pending Candidate. A sure accept or reject (confidence 0.9 or more) decides it; the rest wait for a person. `fdap review` lists them, and `fdap review approve <id>` or `fdap review reject <id>` sends the decision as a Temporal signal to the `identity-review` workflow. Rejecting a wrong Reep link the same way reopens its record to the rules ([ADR 32](docs/adr/0032-reep-first-mapping-layer.md)). The next `fdap transform` carries the decisions into the marts.
 
 ### Transforms
 

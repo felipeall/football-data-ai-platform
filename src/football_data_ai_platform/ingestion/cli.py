@@ -2,8 +2,10 @@
 
 import argparse
 import asyncio
+import getpass
 import time
-from collections.abc import Sequence
+import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -12,12 +14,21 @@ from typing import Any
 import httpx
 from psycopg import AsyncConnection
 from temporalio.client import Client, WorkflowHandle
+from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from football_data_ai_platform.config import Settings
 from football_data_ai_platform.fetch_attempts import FetchAttemptStore, SuccessRate
 from football_data_ai_platform.identity.activities import ClubResult, IdentityResolutionResult
-from football_data_ai_platform.identity.store import ClubStore, ClubTaken
+from football_data_ai_platform.identity.review import Judgement, Review, ReviewOutcome
+from football_data_ai_platform.identity.store import ClubStore, ClubTaken, IdentityStore
+from football_data_ai_platform.identity.workflows import (
+    IDENTITY_REVIEW_WORKFLOW_ID,
+    IdentityReviewWorkflow,
+    JudgePass,
+    JudgeRequest,
+    ReviewStatus,
+)
 from football_data_ai_platform.ingestion.models import (
     BackfillInput,
     CompetitionSquadsInput,
@@ -307,6 +318,117 @@ async def rename_club(settings: Settings, club_id: str, new_id: str) -> None:
     )
 
 
+async def signal_identity_review(
+    client: Client, task_queue: str, request: JudgeRequest | Review
+) -> WorkflowHandle[Any, ReviewStatus]:
+    """Send `request` to the identity review workflow, starting it if none is running."""
+    signal = "judge" if isinstance(request, JudgeRequest) else "review"
+    handle = await client.start_workflow(
+        IdentityReviewWorkflow.run,
+        id=IDENTITY_REVIEW_WORKFLOW_ID,
+        task_queue=task_queue,
+        id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+        start_signal=signal,
+        start_signal_args=[request],
+    )
+    # Pinned to that run: a later run under the same ID knows nothing of this request.
+    return client.get_workflow_handle_for(
+        IdentityReviewWorkflow.run, IDENTITY_REVIEW_WORKFLOW_ID, run_id=handle.result_run_id
+    )
+
+
+async def wait_for_request[T](
+    handle: WorkflowHandle[Any, ReviewStatus], find: Callable[[ReviewStatus], T | None]
+) -> T:
+    """Poll the workflow until it has handled the request `find` looks for."""
+    while True:
+        found = find(await handle.query(IdentityReviewWorkflow.status))
+        if found is not None:
+            return found
+        await asyncio.sleep(1)
+
+
+async def judge(settings: Settings) -> None:
+    client = await _client(settings)
+    request = JudgeRequest(str(uuid.uuid4()))
+    handle = await signal_identity_review(client, settings.temporal_task_queue, request)
+    print(f"Identity review {handle.run_id}: judging the pending Candidates")
+    judged = await wait_for_request(
+        handle,
+        lambda status: next(
+            (p for p in status.judge_passes if p.request_id == request.request_id), None
+        ),
+    )
+    _print_judge_pass(judged)
+
+
+def _print_judge_pass(judged: JudgePass) -> None:
+    print(f"{len(judged.judgements)} Candidates judged:")
+    for j in judged.judgements:
+        _print_judgement(j)
+    if judged.error:
+        print(f"The judge stopped: {judged.error}. Run `fdap judge` again to resume.")
+    waiting = sum(1 for j in judged.judgements if j.status == "pending")
+    if waiting:
+        print(f"{waiting} wait for review: `fdap review` lists them.")
+
+
+def _print_judgement(j: Judgement) -> None:
+    players = ", ".join(j.player_names) or "no named records"
+    print(
+        f"  {j.candidate_id:>6} {j.source} {j.source_record_id} {j.name} -> Player"
+        f" {j.player_id} ({players}): {j.decision} at {j.confidence:.2f}, now {j.status}"
+    )
+    print(f"         {j.reasoning}")
+    if j.not_applied:
+        print(f"         not applied: {j.not_applied}")
+
+
+async def list_reviews(settings: Settings) -> None:
+    """The pending Candidates, with the judge's answer where there is one."""
+    async with await AsyncConnection.connect(settings.database_url, autocommit=True) as conn:
+        pending = await IdentityStore(conn).pending()
+    if not pending:
+        print("No Candidate awaits review.")
+        return
+    print(f"{len(pending)} Candidates await review:")
+    for c in pending:
+        evidence = c.evidence
+        method = evidence.get("proposed_method", c.method)
+        print(
+            f"  {c.candidate_id:>6} {c.source} {c.source_record_id} {evidence.get('name')} ->"
+            f" Player {c.player_id} ({evidence.get('candidate')}), {method}"
+        )
+        if "disagreement" in evidence:
+            print(f"         disagreement: {evidence['disagreement']}")
+        if "judge" in evidence:
+            j = evidence["judge"]
+            print(f"         judge: {j['decision']} at {j['confidence']:.2f}: {j['reasoning']}")
+            if j.get("not_applied"):
+                print(f"         not applied: {j['not_applied']}")
+    print("Decide one with `fdap review approve <id>` or `fdap review reject <id>`.")
+
+
+async def review(
+    settings: Settings, candidate_id: int, approve: bool, reviewer: str, note: str | None
+) -> None:
+    client = await _client(settings)
+    request = Review(str(uuid.uuid4()), candidate_id, approve, reviewer, note)
+    handle = await signal_identity_review(client, settings.temporal_task_queue, request)
+    outcome: ReviewOutcome = await wait_for_request(
+        handle,
+        lambda status: next(
+            (r for r in status.reviews if r.request_id == request.request_id), None
+        ),
+    )
+    if not outcome.applied:
+        raise SystemExit(f"Not applied: {outcome.message}")
+    print(
+        f"Candidate {candidate_id} {outcome.status} by reviewer:{reviewer}."
+        " Run `transform` to rebuild the marts."
+    )
+
+
 REEP_DATA = Path("data/reep")
 REEP_PROVIDERS = ("sofascore", "transfermarkt", "understat")
 
@@ -538,6 +660,26 @@ def main() -> None:
         "transform",
         help="run dbt, the Clubs and Identity Resolution in order; joins a run that is going",
     )
+    commands.add_parser(
+        "judge", help="ask the LLM judge about every pending Identity Candidate it has not seen"
+    )
+    review_parser = commands.add_parser(
+        "review",
+        help="list the Identity Candidates awaiting review, or approve or reject one",
+    )
+    decisions = review_parser.add_subparsers(dest="decision")
+    for decision, decision_help in (
+        ("approve", "accept the Candidate: it becomes the link"),
+        ("reject", "reject the Candidate; a rejected Reep link reopens its record to the rules"),
+    ):
+        decision_parser = decisions.add_parser(decision, help=decision_help)
+        decision_parser.add_argument("candidate_id", type=int, help="from `fdap review`")
+        decision_parser.add_argument(
+            "--reviewer",
+            default=getpass.getuser(),
+            help="who decides, stored as reviewer:<name> (default: your user name)",
+        )
+        decision_parser.add_argument("--note", help="why, stored with the decision")
 
     today = datetime.now(UTC).date()
     rates = commands.add_parser(
@@ -572,6 +714,20 @@ def main() -> None:
         asyncio.run(rename_club(settings, args.club_id, args.new_id))
     elif args.command == "transform":
         asyncio.run(transform(settings))
+    elif args.command == "judge":
+        asyncio.run(judge(settings))
+    elif args.command == "review" and args.decision is None:
+        asyncio.run(list_reviews(settings))
+    elif args.command == "review":
+        asyncio.run(
+            review(
+                settings,
+                args.candidate_id,
+                args.decision == "approve",
+                args.reviewer,
+                args.note,
+            )
+        )
     elif args.command == "schedule-understat":
         asyncio.run(schedule_understat(settings))
     elif args.command == "understat-backfill":

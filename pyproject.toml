@@ -8,11 +8,13 @@ authors = [{ name = "Felipe Allegretti" }]
 requires-python = ">=3.13"
 dependencies = [
     "alembic==1.20.0",
+    "anthropic==2.3.0",
     "camoufox[geoip]==0.5.8",
     "curl-cffi==0.16.3",
     "dbt-postgres==1.11.0",
     "duckdb==1.4.1",
     "httpx>=0.28.1,<1",
+    "langfuse==4.17.0",
     "psycopg[binary]==3.3.6",
     "pydantic-settings==2.15.0",
     "rapidfuzz==3.14.6",
@@ -27,7 +29,6 @@ fdap = "football_data_ai_platform.ingestion.cli:main"
 [dependency-groups]
 dev = [
     "import-linter",
-    "langfuse==4.17.0",
     "pyright",
     "pytest",
     "pytest-asyncio==1.4.0",
