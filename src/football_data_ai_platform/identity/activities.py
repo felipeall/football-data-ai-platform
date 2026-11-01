@@ -48,17 +48,20 @@ class UnlinkedRecord:
     source: str
     source_record_id: int
     name: str
-    minutes: int  # in every stored Match
+    minutes: int  # in the covered Season's stored Matches
     pending: bool  # whether a Candidate waits for the judge
 
 
 @dataclass(frozen=True)
 class IdentityResolutionResult:
     reep_release: str | None  # the Reep release that decided first; None when skipped
+    covered_season: int  # by its start year (ADR 35)
     players_created: int
     candidates_stored: int
     # Every Candidate in the schema after the run, not only this run's.
     candidates: list[CandidateCount]
+    # Only records with an Appearance in the covered Season (ADR 35): records that played
+    # only in other stored Seasons, or never played, are out of scope.
     unlinked: list[UnlinkedRecord]
     reep_conflicts: list[ReepConflict]
 
@@ -73,11 +76,16 @@ class ClubResult:
 
 
 class IdentityActivities:
-    """`reep_release` is the pinned Reep release (ADR 32); None skips the Reep step."""
+    """`reep_release` is the pinned Reep release (ADR 32); None skips the Reep step.
+    `covered_season` is the Season the PoC covers (ADR 35), by its start year: Identity
+    Resolution lists and counts only the unlinked records that played in it."""
 
-    def __init__(self, database_url: str, reep_release: str | None = None) -> None:
+    def __init__(
+        self, database_url: str, reep_release: str | None = None, *, covered_season: int
+    ) -> None:
         self._database_url = database_url
         self._reep_release = reep_release
+        self._covered_season = covered_season
 
     @activity.defn
     async def create_clubs(self) -> ClubResult:
@@ -179,17 +187,18 @@ class IdentityActivities:
             )
             store = IdentityStore(conn)
             resolution = await resolve(store, records, self._reep_release, bridges)
-            minutes = await _minutes(conn)
+            minutes = await _minutes(conn, self._covered_season)
             counts = [CandidateCount(*row) for row in await store.counts()]
         unlinked = [
             UnlinkedRecord(
                 source,
                 player.source_record_id,
                 player.name,
-                minutes.get((source, player.source_record_id), 0),
+                minutes[source, player.source_record_id],
                 pending,
             )
             for source, player, pending in resolution.unlinked
+            if (source, player.source_record_id) in minutes
         ]
         for conflict in resolution.reep_conflicts:
             activity.logger.warning(
@@ -200,13 +209,16 @@ class IdentityActivities:
                 ", ".join(f"{source} {record}" for source, record in conflict.records),
             )
         activity.logger.info(
-            "Identity Resolution: %d Players created, %d Candidates stored, %d records unlinked",
+            "Identity Resolution: %d Players created, %d Candidates stored, %d records that"
+            " played in Season %d unlinked",
             resolution.players_created,
             resolution.candidates_stored,
             len(unlinked),
+            self._covered_season,
         )
         return IdentityResolutionResult(
             self._reep_release,
+            self._covered_season,
             resolution.players_created,
             resolution.candidates_stored,
             counts,
@@ -333,25 +345,14 @@ def _by_source(links: dict[RecordKey, int]) -> defaultdict[str, dict[int, int]]:
     return by_source
 
 
-async def _minutes(conn: AsyncConnection[Any]) -> dict[RecordKey, int]:
-    """Each Sofascore and Understat player's minutes in every stored Match."""
+async def _minutes(conn: AsyncConnection[Any], season: int) -> dict[RecordKey, int]:
+    """Each Sofascore and Understat player's minutes in the stored Matches of `season`;
+    a player with no Appearance in it is left out."""
     minutes: dict[RecordKey, int] = {}
     for source, query in _MINUTES.items():
-        cursor = await conn.execute(query)
+        cursor = await conn.execute(query, (season,))
         minutes |= {(source, player): total for player, total in await cursor.fetchall()}
     return minutes
-
-
-_MINUTES: dict[str, LiteralString] = {
-    SOFASCORE: """
-        SELECT player_id, sum(minutes_played)::int FROM staging.stg_sofascore__appearances
-        GROUP BY player_id
-    """,
-    UNDERSTAT: """
-        SELECT player_id, sum(minutes_played)::int FROM staging.stg_understat__appearances
-        GROUP BY player_id
-    """,
-}
 
 
 async def _players(conn: AsyncConnection[Any], query: LiteralString) -> list[SourcePlayer]:
@@ -360,6 +361,25 @@ async def _players(conn: AsyncConnection[Any], query: LiteralString) -> list[Sou
         SourcePlayer(player_id, name, birth_date)
         for player_id, name, birth_date in await cursor.fetchall()
     ]
+
+
+# Sofascore names a Season "25/26"; `marts.matches` reads its start year the same way.
+_MINUTES: dict[str, LiteralString] = {
+    SOFASCORE: """
+        SELECT appearances.player_id, sum(appearances.minutes_played)::int
+        FROM staging.stg_sofascore__appearances AS appearances
+        JOIN staging.stg_sofascore__matches AS matches USING (match_id)
+        WHERE split_part(matches.season_year, '/', 1)::int + 2000 = %s
+        GROUP BY appearances.player_id
+    """,
+    UNDERSTAT: """
+        SELECT appearances.player_id, sum(appearances.minutes_played)::int
+        FROM staging.stg_understat__appearances AS appearances
+        JOIN staging.stg_understat__matches AS matches USING (match_id)
+        WHERE matches.season = %s
+        GROUP BY appearances.player_id
+    """,
+}
 
 
 # A source's Appearances in canonical Matches both sources have, for canonical Clubs.

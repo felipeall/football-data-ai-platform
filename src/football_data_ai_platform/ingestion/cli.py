@@ -276,16 +276,20 @@ def _print_identity(result: IdentityResolutionResult) -> None:
         print(f"  {conflict.reep_id}: Players {players}, through {records}")
     for source in ("sofascore", "understat"):
         unlinked = [r for r in result.unlinked if r.source == source]
-        played = sum(1 for r in unlinked if r.minutes > 0)
         print(
-            f"{len(unlinked)} {source} players link to no Player, {played} of them with minutes;"
-            " their Appearances stay out of the Player marts:"
+            f"{len(unlinked)} {source} players who played in {_season(result.covered_season)}"
+            " link to no Player; their Appearances stay out of the Player marts:"
         )
         for record in sorted(unlinked, key=lambda r: (-r.minutes, r.source_record_id)):
             pending = ", a Candidate pending" if record.pending else ""
             print(
                 f"  {record.source_record_id:>9} {record.name} ({record.minutes} minutes{pending})"
             )
+
+
+def _season(start_year: int) -> str:
+    """A Season as Sofascore writes it: 2025 is "25/26"."""
+    return f"{start_year % 100:02}/{(start_year + 1) % 100:02}"
 
 
 async def rename_club(settings: Settings, club_id: str, new_id: str) -> None:

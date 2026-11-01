@@ -224,7 +224,7 @@ async def test_stage_links_refuse_overlapping_round_ranges(
 async def test_creating_clubs_needs_the_pinned_reep_release_loaded(
     connection: AsyncConnection[Any], database_url: str, release: str | None, error_type: str
 ) -> None:
-    activities = IdentityActivities(database_url, release)
+    activities = IdentityActivities(database_url, release, covered_season=2025)
 
     with pytest.raises(ApplicationError) as raised:
         await ActivityEnvironment().run(activities.create_clubs)
