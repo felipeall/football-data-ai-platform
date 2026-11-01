@@ -1,13 +1,13 @@
-name: football_intel
+name: football_data_ai_platform
 version: "1.0.0"
-profile: football_intel
+profile: football_data_ai_platform
 
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
 
 models:
-  football_intel:
+  football_data_ai_platform:
     staging:
       +schema: staging
       +materialized: view

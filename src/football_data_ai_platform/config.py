@@ -20,8 +20,8 @@ class Settings(BaseSettings):
 
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    postgres_db: str = "football_intel"
-    postgres_user: str = "football_intel"
+    postgres_db: str = "football_data_ai_platform"
+    postgres_user: str = "football_data_ai_platform"
     postgres_password: str = ""
 
     temporal_host: str = "localhost"

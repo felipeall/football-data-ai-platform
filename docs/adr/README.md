@@ -36,4 +36,5 @@
 - [34. Canonical IDs are ours, created from Reep, then Transfermarkt](0034-canonical-ids-are-ours.md)
 - [35. The PoC covers last season only; Transfermarkt squads for that season](0035-poc-covers-last-season.md)
 - [36. Repository renamed to football-data-ai-platform; internal names stay](0036-repository-renamed.md) — amended by ADR 37
-- [37. Package and CLI renamed; stack-identity names stay](0037-package-and-cli-renamed.md)
+- [37. Package and CLI renamed; stack-identity names stay](0037-package-and-cli-renamed.md) — amended by ADR 38
+- [38. Stack identity renamed to football-data-ai-platform; Langfuse stays](0038-stack-identity-renamed.md)

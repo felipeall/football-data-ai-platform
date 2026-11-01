@@ -1,6 +1,6 @@
 # 37. Package and CLI renamed; stack-identity names stay
 
-Status: Accepted — 2026-11-01. Amends ADR 36's decision that internal names stay.
+Status: Accepted — 2026-11-01. Amends ADR 36's decision that internal names stay. Stack-identity names superseded by ADR 38.
 
 ## Context
 ADR 36 renamed the repository to `football-data-ai-platform` and kept every internal name `football-intel` / `football_intel`. That left the code and the repository with different names. Readers see two of those internal names: contributors see the Python package, and operators see the CLI. Nobody reads the others (the Compose project, the Postgres database and role, the dbt project and the Langfuse organisation), and two of them key live data: the Compose project name prefixes every Docker volume, and the database name holds the live data.

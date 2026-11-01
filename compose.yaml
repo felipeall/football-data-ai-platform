@@ -1,4 +1,4 @@
-name: football-intel
+name: football-data-ai-platform
 
 # Langfuse v4 (ADR 18): web, worker, and its own Postgres, ClickHouse, Redis
 # and MinIO. Secrets come from .env; see .env.example. Nothing traces to it until the

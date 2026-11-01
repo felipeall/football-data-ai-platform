@@ -39,13 +39,13 @@ jobs:
       postgres:
         image: pgvector/pgvector:0.8.7-pg17
         env:
-          POSTGRES_DB: football_intel
-          POSTGRES_USER: football_intel
+          POSTGRES_DB: football_data_ai_platform
+          POSTGRES_USER: football_data_ai_platform
           POSTGRES_PASSWORD: ci-only
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U football_intel -d football_intel"
+          --health-cmd "pg_isready -U football_data_ai_platform -d football_data_ai_platform"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
