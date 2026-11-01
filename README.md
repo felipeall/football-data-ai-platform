@@ -2,7 +2,7 @@
 
 > Durable football data ingestion with Temporal, and an AI scouting agent on top.
 
-**Status:** early development — local proof of concept, milestone M2 of 7. A hosted MVP behind GitHub login follows. See the [roadmap](#roadmap).
+**Status:** early development — local proof of concept, milestone M3 of 7. A hosted MVP behind GitHub login follows. See the [roadmap](#roadmap).
 
 ## What it does
 
