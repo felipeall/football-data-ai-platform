@@ -339,52 +339,56 @@ async def test_bridges_of_a_release_not_loaded_fail_without_retries(
     reference: AsyncConnection[Any],
 ) -> None:
     with pytest.raises(ApplicationError) as error:
-        await _reep_bridges(reference, RELEASE, "transfermarkt")
+        await _reep_bridges(reference, RELEASE)
 
     assert error.value.non_retryable
 
 
-async def test_bridges_map_each_source_to_sofascore_and_skip_persons_without_one(
+async def test_bridges_list_every_provider_s_players_by_person(
     reference: AsyncConnection[Any], tmp_path: Path
 ) -> None:
     files = _write_release(tmp_path)
     await load.load(reference, release.Manifest(RELEASE, _manifest(files)), _loaded(tmp_path))
 
-    # Person C (Transfermarkt 30, Understat 300) is loaded, but has no Sofascore player to
-    # link to: Identity Resolution ignores it until it targets Players (ADR 34).
-    assert await _reep_bridges(reference, RELEASE, "transfermarkt") == [
-        ReepBridge(10, 1, "rule", "scope"),
-        ReepBridge(12, 1, "rule", "scope"),
-    ]
-    assert await _reep_bridges(reference, RELEASE, "understat") == [
-        ReepBridge(100, 1, "rule", "scope")
+    # Person C has no Sofascore player, but still maps its records to one Player (ADR 34).
+    assert sorted(await _reep_bridges(reference, RELEASE), key=repr) == [
+        ReepBridge("rA", "sofascore", 1, "rule", "scope"),
+        ReepBridge("rA", "transfermarkt", 10, "rule", "scope"),
+        ReepBridge("rA", "transfermarkt", 12, "rule", "scope"),
+        ReepBridge("rA", "understat", 100, "rule", "scope"),
+        ReepBridge("rC", "transfermarkt", 30, "rule", "scope"),
+        ReepBridge("rC", "understat", 300, "rule", "scope"),
     ]
 
 
-def test_reep_links_only_records_we_hold_to_one_sofascore_player() -> None:
+def _reep(bridges: list[ReepBridge], held: dict[str, set[int]]) -> list[Proposal]:
+    return reep_proposals(RELEASE, bridges, held, set(), {}, {}, [], [])
+
+
+def test_reep_links_only_records_we_hold_and_skips_records_of_two_persons() -> None:
     bridges = [
-        ReepBridge(10, 1),
-        ReepBridge(11, 2),  # we do not hold Transfermarkt 11
-        ReepBridge(12, 99),  # we do not hold Sofascore 99
-        ReepBridge(13, 1),  # Reep maps 13 to two of our Sofascore players: rules decide
-        ReepBridge(13, 3),
+        ReepBridge("rA", "sofascore", 1),
+        ReepBridge("rA", "transfermarkt", 10),
+        ReepBridge("rA", "transfermarkt", 11),  # not held
+        ReepBridge("rB", "transfermarkt", 12),
+        ReepBridge("rC", "transfermarkt", 12),  # 12 is two persons: left to the rules
     ]
 
-    proposals = reep_proposals(RELEASE, bridges, held={10, 12, 13}, sofascore={1, 2, 3})
+    proposals = _reep(bridges, {"sofascore": {1}, "transfermarkt": {10, 12}})
 
-    assert [(p.source_record_id, p.sofascore_player_id) for p in proposals] == [(10, 1)]
-    (proposal,) = proposals
-    assert (proposal.method, proposal.decided_by, proposal.accepted) == (
-        Method.REEP_BRIDGE,
-        f"reep:{RELEASE}",
-        True,
-    )
+    assert [(p.source, p.source_record_id, p.player) for p in proposals] == [
+        ("sofascore", 1, "reep:rA"),
+        ("transfermarkt", 10, "reep:rA"),
+    ]
+    assert {(p.method, p.decided_by, p.accepted) for p in proposals} == {
+        (Method.REEP_BRIDGE, f"reep:{RELEASE}", True)
+    }
 
 
 async def _statuses(connection: AsyncConnection[Any]) -> list[tuple[Any, ...]]:
     cursor = await connection.execute(
-        "SELECT source_record_id, player_id, method, status, decided_by"
-        " FROM identity.identity_candidates WHERE source = 'transfermarkt' ORDER BY candidate_id"
+        "SELECT source, source_record_id, player_id, method, status, decided_by"
+        " FROM identity.identity_candidates ORDER BY candidate_id"
     )
     return await cursor.fetchall()
 
@@ -393,50 +397,65 @@ async def test_reep_decides_first_and_the_rules_skip_what_it_linked(
     reference: AsyncConnection[Any],
 ) -> None:
     store = IdentityStore(reference)
-    players, _ = await store.anchor_sofascore([1, 2])
+    held = {"sofascore": {1}, "transfermarkt": {10}}
 
     await store.propose(
-        "transfermarkt", reep_proposals(RELEASE, [ReepBridge(10, 1)], {10}, {1, 2}), players
+        _reep([ReepBridge("rA", "sofascore", 1), ReepBridge("rA", "transfermarkt", 10)], held)
     )
-    stored = await store.propose(
-        "transfermarkt",
+    (player,) = set((await store.links()).values())
+    stored, created = await store.propose(
         [
-            Proposal(10, 2, Method.NAME_BIRTH_DATE, 1.0),
-            Proposal(11, 2, Method.NAME_BIRTH_DATE, 1.0),
-        ],
-        players,
+            Proposal("transfermarkt", 10, "transfermarkt:10", Method.TRANSFERMARKT_PLAYER, 1.0),
+            Proposal("transfermarkt", 11, "transfermarkt:11", Method.TRANSFERMARKT_PLAYER, 1.0),
+        ]
     )
 
-    assert stored == 1
+    assert (stored, created) == (1, 1)
     assert await _statuses(reference) == [
-        ("10", 1, "reep_bridge", "accepted", f"reep:{RELEASE}"),
-        ("11", 2, "name_birth_date", "accepted", "rule:name_birth_date"),
+        ("sofascore", "1", player, "reep_bridge", "accepted", f"reep:{RELEASE}"),
+        ("transfermarkt", "10", player, "reep_bridge", "accepted", f"reep:{RELEASE}"),
+        (
+            "transfermarkt",
+            "11",
+            player + 1,
+            "transfermarkt_player",
+            "accepted",
+            "rule:transfermarkt_player",
+        ),
     ]
 
 
-async def test_a_rejected_reep_link_reopens_its_record_to_the_rules(
+async def test_a_rejected_reep_link_reopens_its_record_to_the_rules_but_not_to_reep(
     reference: AsyncConnection[Any],
 ) -> None:
     store = IdentityStore(reference)
-    players, _ = await store.anchor_sofascore([1, 2])
-    await store.propose(
-        "transfermarkt", reep_proposals(RELEASE, [ReepBridge(10, 1)], {10}, {1, 2}), players
-    )
+    bridges = [ReepBridge("rA", "transfermarkt", 10)]
+    await store.propose(_reep(bridges, {"transfermarkt": {10}}))
     await reference.execute(
         "UPDATE identity.identity_candidates SET status = 'rejected' WHERE method = 'reep_bridge'"
     )
 
-    # The same wrong link again is not stored; the rules' own link is.
-    stored = await store.propose(
-        "transfermarkt",
-        [Proposal(10, 1, Method.FUZZY, 0.95), Proposal(10, 2, Method.NAME_BIRTH_DATE, 1.0)],
-        players,
+    # Reep would create a fresh Player for it; it skips the record instead.
+    again = reep_proposals(
+        RELEASE,
+        bridges,
+        {"transfermarkt": {10}},
+        await store.proposed(reopen_rejected_reep=False),
+        await store.links(),
+        {},
+        [],
+        [],
+    )
+    # Transfermarkt, after Reep, creates its Player.
+    stored, created = await store.propose(
+        [Proposal("transfermarkt", 10, "transfermarkt:10", Method.TRANSFERMARKT_PLAYER, 1.0)]
     )
 
-    assert stored == 1
-    assert await _statuses(reference) == [
-        ("10", 1, "reep_bridge", "rejected", f"reep:{RELEASE}"),
-        ("10", 2, "name_birth_date", "accepted", "rule:name_birth_date"),
+    assert again == []
+    assert (stored, created) == (1, 1)
+    assert [row[3:5] for row in await _statuses(reference)] == [
+        ("reep_bridge", "rejected"),
+        ("transfermarkt_player", "accepted"),
     ]
 
 
@@ -444,16 +463,36 @@ async def test_a_newer_release_changes_no_existing_candidate(
     reference: AsyncConnection[Any],
 ) -> None:
     store = IdentityStore(reference)
-    players, _ = await store.anchor_sofascore([1, 2])
+    held = {"sofascore": {1, 2}, "transfermarkt": {10}}
     await store.propose(
-        "transfermarkt", reep_proposals(RELEASE, [ReepBridge(10, 1)], {10}, {1, 2}), players
+        _reep(
+            [
+                ReepBridge("rA", "sofascore", 1),
+                ReepBridge("rA", "transfermarkt", 10),
+                ReepBridge("rB", "sofascore", 2),
+            ],
+            held,
+        )
     )
     before = await _statuses(reference)
 
-    # The newer release maps 10 elsewhere; the existing link stays.
-    stored = await store.propose(
-        "transfermarkt", reep_proposals("2026-01-03.1", [ReepBridge(10, 2)], {10}, {1, 2}), players
+    # The newer release maps 10 to person B; the existing link stays.
+    stored, created = await store.propose(
+        reep_proposals(
+            "2026-01-03.1",
+            [
+                ReepBridge("rA", "sofascore", 1),
+                ReepBridge("rB", "sofascore", 2),
+                ReepBridge("rB", "transfermarkt", 10),
+            ],
+            held,
+            await store.proposed(reopen_rejected_reep=False),
+            await store.links(),
+            {},
+            [],
+            [],
+        )
     )
 
-    assert stored == 0
+    assert (stored, created) == (0, 0)
     assert await _statuses(reference) == before
