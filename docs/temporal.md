@@ -315,7 +315,7 @@ Workflow tests use `temporalio.testing.WorkflowEnvironment` (fixtures in `tests/
 - **Read the result:** each workflow returns a dataclass from `models.py` with its counts: `raw_responses` (fetched from the source), `reused` (answered from storage), and failed or not-attempted IDs.
 - **Resume a backfill:** run the same command again. Complete Matches are skipped, and failed or not-attempted ones are fetched.
 - **Worker logs:** `docker compose logs -f worker`.
-- **After a merge:** from the main checkout, `docker compose up --wait --build` rebuilds the worker with the merged code and applies new migrations. Workflows already running continue on the new code, so keep changes to running workflows replay-compatible.
+- **After a merge:** from the main checkout, `scripts/deploy-live.sh` (`docker compose up --wait --build` behind a lock; see `docs/agents/worktrees.md`) rebuilds the worker with the merged code and applies new migrations. Workflows already running continue on the new code, so keep changes to running workflows replay-compatible.
 - **A start that waits forever:** no worker polls that task queue. Usually this is a worktree queue with no worktree worker running.
 
 ## Related ADRs
