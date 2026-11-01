@@ -347,15 +347,15 @@ async def test_dbt_builds_the_player_marts_from_linked_source_records(
 
     assert "WARN 4 warn_appearances_left_out_of_the_player_marts " in build.stdout
     cursor = await connection.execute(
-        "SELECT player_id, name, nationality, height_cm, position, understat_position,"
+        "SELECT player_id, name, nationality_code, height_cm, position, understat_position,"
         " current_club_id, market_value_eur, sofascore_player_id, understat_player_id,"
         " transfermarkt_player_id FROM marts.players ORDER BY player_id"
     )
     # Transfermarkt's attributes where linked, else Sofascore's, else Understat's name.
     # Transfermarkt's club 1 is not one of our Clubs.
     assert await cursor.fetchall() == [
-        (linked, "Sam Back", "Testland", 185, "Left-Back", "MC", None, 10_000_000, 11, 801, 102),
-        (sofascore_only, "Player 21", None, None, None, None, None, None, 21, None, None),
+        (linked, "Sam Back", "CI", 185, "Left-Back", "MC", None, 10_000_000, 11, 801, 102),
+        (sofascore_only, "Player 21", "CI", None, None, None, None, None, 21, None, None),
         (understat_only, "Player 802", None, None, None, "MC", None, None, None, 802, None),
     ]
 
@@ -446,6 +446,46 @@ async def test_the_player_marts_hold_the_covered_seasons_only(
     await ActivityEnvironment().run(dbt.build_dbt, ["--select", "appearances"])
     cursor = await connection.execute("SELECT season, count(*) FROM marts.appearances GROUP BY 1")
     assert await cursor.fetchall() == [(2024, 1)]
+
+
+async def test_a_player_s_nationality_is_one_code_whatever_the_source_s_spelling(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, per_player=True)
+    await fetch_squad(
+        transfermarkt.recording_transport(
+            TransfermarktStub().transport(),
+            RawResponseStore(connection),
+            FetchAttemptStore(connection),
+        ),
+        CLUB_ID,
+        SEASON_ID,
+    )
+    # Transfermarkt's `Cote d'Ivoire`, Sofascore's `Côte d'Ivoire`.
+    transfermarkt_ivorian = await _link(connection, ("transfermarkt", 102))
+    sofascore_ivorian = await _link(connection, ("sofascore", 21))
+    # Transfermarkt's England, and Sofascore's under its own code `EN`.
+    transfermarkt_english = await _link(connection, ("transfermarkt", 101))
+    sofascore_english = await _link(connection, ("sofascore", 12))
+    # Transfermarkt's USSR maps to no code, so Sofascore's country stands in.
+    ussr_and_ivorian = await _link(connection, ("transfermarkt", 103), ("sofascore", 11))
+    no_country = await _link(connection, ("understat", 802))
+
+    build = _dbt_build(database_url, tmp_path, *COVER_2024)
+
+    cursor = await connection.execute(
+        "SELECT player_id, nationality_code, nationality FROM marts.players ORDER BY player_id"
+    )
+    assert await cursor.fetchall() == [
+        (transfermarkt_ivorian, "CI", "Côte d'Ivoire"),
+        (sofascore_ivorian, "CI", "Côte d'Ivoire"),
+        (transfermarkt_english, "GB-ENG", "England"),
+        (sofascore_english, "GB-ENG", "England"),
+        (ussr_and_ivorian, "CI", "Côte d'Ivoire"),
+        (no_country, None, None),
+    ]
+    # Its USSR is still listed, so the seed gains a row.
+    assert "WARN 1 warn_players_with_an_unmapped_nationality " in build.stdout
 
 
 async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(

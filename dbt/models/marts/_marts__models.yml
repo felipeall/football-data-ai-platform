@@ -12,6 +12,20 @@ models:
         data_tests: [unique, not_null]
       - name: name
         data_tests: [not_null]
+      - name: nationality_code
+        description: >
+          The Player's Nationality: Transfermarkt's first nationality where it maps to a
+          code in the `country_mappings` seed, else Sofascore's. One code whatever the
+          source's spelling: `CI` for Transfermarkt's `Cote d'Ivoire` and Sofascore's
+          `Côte d'Ivoire`, `GB-ENG` for England. Null when neither source gives a country
+          that maps; `warn_players_with_an_unmapped_nationality` lists those that give one.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('countries')
+                field: country_code
+      - name: nationality
+        description: Our display name for `nationality_code`, from the `countries` seed.
       - name: position
         description: Transfermarkt's detailed position (`Left-Back`); null without a link.
       - name: sofascore_position

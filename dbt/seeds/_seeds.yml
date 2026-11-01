@@ -1,0 +1,47 @@
+version: 2
+
+seeds:
+  - name: countries
+    description: >
+      Our countries, keyed by the Nationality code: ISO 3166-1 alpha-2 (`FR`), ISO 3166-2
+      for the four home nations (`GB-ENG`, `GB-SCT`, `GB-WLS`, `GB-NIR`), which ISO 3166-1
+      would merge into `GB`, and the user-assigned `XK` for Kosovo. `name` is our display
+      name, whatever the sources call the country. Former countries (the USSR, Yugoslavia)
+      are left out until one appears in our data.
+    config:
+      column_types: {country_code: text, name: text}
+    columns:
+      - name: country_code
+        data_tests: [unique, not_null]
+      - name: name
+        data_tests: [unique, not_null]
+
+  - name: country_mappings
+    description: >
+      Each source's value for a country, mapped to its Nationality code: Sofascore's
+      `alpha3`, Transfermarkt's country ID. Every current country in Transfermarkt's list is
+      mapped, two IDs to one code where it has the country twice (`Swaziland`, `Eswatini`).
+      Sofascore's rows are the countries seen in its stored lineups; add one when
+      `warn_players_with_an_unmapped_nationality` lists it.
+    config:
+      column_types: {source: text, source_country: text, country_code: text}
+    data_tests:
+      # One code per source value.
+      - unique:
+          column_name: "source || ':' || source_country"
+    columns:
+      - name: source
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [sofascore, transfermarkt]
+      - name: source_country
+        data_tests: [not_null]
+      - name: country_code
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('countries')
+                field: country_code

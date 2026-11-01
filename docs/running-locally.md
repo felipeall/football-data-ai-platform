@@ -105,7 +105,7 @@ Clubs, Competitions and Stages have our own IDs, kept in `identity` ([ADR 34](ad
 
 The Player marts are keyed to the canonical Player and Match, and hold the covered Season only ([ADR 35](adr/0035-poc-covers-last-season.md)). The Transform Run passes `COVERED_SEASON` to dbt as the var `covered_seasons`. When you run dbt by hand, the var defaults to `[2025]`; override it with `--vars '{covered_seasons: [2024]}'`.
 
-- `marts.players` has each Player linked to a Source Record, with Transfermarkt's attributes where linked (birth date, nationality, position, current market value), else Sofascore's, and `understat_position`, the detailed position (DL, AMC…) of the Understat Appearances they started.
+- `marts.players` has each Player linked to a Source Record, with Transfermarkt's attributes where linked (birth date, position, current market value), else Sofascore's, and `understat_position`, the detailed position (DL, AMC…) of the Understat Appearances they started. `nationality_code` is the Player's Nationality (`CI`, `GB-ENG`) whichever source gave it, and `nationality` our name for it. A country that maps to no code is listed by the warning `warn_players_with_an_unmapped_nationality`: add it to `dbt/seeds/country_mappings.csv`.
 - `marts.appearances` has one row per Player and Match, with minutes and Sofascore's per-match statistics (0 where Sofascore leaves a zero out) next to Understat's xG and xA.
 - `marts.actions` has the located Actions from the rating breakdowns.
 - `marts.shots` has both sources' Shots, one row per source Shot, with own goals left out.

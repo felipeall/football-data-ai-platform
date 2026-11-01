@@ -5,6 +5,7 @@ profile: football_data_ai_platform
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
+seed-paths: ["seeds"]
 
 models:
   football_data_ai_platform:
@@ -16,6 +17,12 @@ models:
     marts:
       +schema: marts
       +materialized: table
+
+# Built with the marts (step 4 of the Transform Run), never by step 1's `--select staging`:
+# only marts may ref a seed.
+seeds:
+  football_data_ai_platform:
+    +schema: staging
 
 vars:
   # The Seasons the Player marts hold (ADR 35: the PoC covers 25/26). Stored Matches of other
