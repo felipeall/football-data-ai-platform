@@ -2,6 +2,8 @@
 
 import argparse
 import asyncio
+import io
+import sys
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -340,11 +342,10 @@ async def reep_status(settings: Settings) -> None:
     for release, gate_passed, loaded_at, persons, person_rows, teams, team_rows in loaded:
         print(
             f"Loaded: {release} on {loaded_at:%Y-%m-%d %H:%M} UTC, gate passed: {gate_passed}; "
-            f"{persons} persons ({person_rows} bridges), {teams} teams ({team_rows} bridges)",
-            flush=True,
+            f"{persons} persons ({person_rows} bridges), {teams} teams ({team_rows} bridges)"
         )
     if not loaded:
-        print("Loaded: none; run `fdap load-reep`", flush=True)
+        print("Loaded: none; run `fdap load-reep`")
     try:
         async with reep_release.client() as api:
             newer = await reep_release.releases_since(api, pinned)
@@ -455,6 +456,11 @@ async def success_rates(settings: Settings, first_day: date, last_day: date) -> 
 
 
 def main() -> None:
+    # Redirected to a file or pipe, stdout is block-buffered: a status line printed
+    # before a long wait (`Started Transform Run …`) would land only at exit.
+    stdout: object = sys.stdout
+    if isinstance(stdout, io.TextIOWrapper):
+        stdout.reconfigure(line_buffering=True)
     parser = argparse.ArgumentParser(prog="fdap")
     commands = parser.add_subparsers(dest="command", required=True)
     refresh_help = "fetch from the source even if fresh data is stored"
