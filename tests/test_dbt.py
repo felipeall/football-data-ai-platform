@@ -6,16 +6,19 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from psycopg import AsyncConnection
 from psycopg.conninfo import conninfo_to_dict
 
 from football_intel.fetch_attempts import FetchAttemptStore
 from football_intel.raw_responses import RawResponseStore
-from football_intel.sources import sofascore, understat
+from football_intel.sources import sofascore, transfermarkt, understat
 from football_intel.sources.sofascore.matches import MatchNotFinished, fetch_match
+from football_intel.sources.transfermarkt.squads import fetch_squad
 from football_intel.sources.understat import league as understat_league
 from tests.sofascore_stub import NOT_STARTED_EVENT_ID, SofascoreStub
+from tests.transfermarkt_stub import CLUB_ID, PLAYERS, TransfermarktStub
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
 
 DBT_PROJECT = Path(__file__).parent.parent / "dbt"
@@ -154,6 +157,67 @@ async def test_dbt_links_matches_across_sources_by_season_and_clubs(
     assert await cursor.fetchall() == [
         ("2024:arsenal:chelsea", 2024, "arsenal", "chelsea", 1001, 1),
         ("2024:chelsea:arsenal", 2024, "chelsea", "arsenal", 1003, 2),
+    ]
+
+
+SQUADS_BY_SEASON = {"2025": ("101", "102"), "2024": ("101", "103")}
+
+
+class TwoSeasonsStub(TransfermarktStub):
+    """Player 101 is in club 1's squad in two seasons, next to a different teammate each
+    season, so each season's batched `/players` request has its own URL. Between the two
+    fetches the player moves: the later answer has them at club 4."""
+
+    NEW_CLUB_ID = 4
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.players_answered = 0
+
+    def handle(self, request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path == f"/club/{CLUB_ID}/squad":
+            ids = SQUADS_BY_SEASON[request.url.params["season"]]
+            members = [
+                {"playerId": int(i), "type": "historical", "shirtNumber": n, "isCaptain": False}
+                for n, i in enumerate(ids, start=1)
+            ]
+            return httpx.Response(200, json={"success": True, "data": {"squad": members}})
+        if path == "/players":
+            self.players_answered += 1
+            players = dict(PLAYERS)
+            if self.players_answered > 1:
+                moved = [{"type": "current", "clubId": self.NEW_CLUB_ID}]
+                players["101"] = PLAYERS["101"] | {"clubAssignments": moved}
+            ids = request.url.params.get_list("ids[]")
+            return httpx.Response(
+                200, json={"success": True, "data": [players[i] for i in ids if i in players]}
+            )
+        return super().handle(request)
+
+
+async def test_dbt_keeps_one_transfermarkt_player_across_seasons(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    stub = TwoSeasonsStub()
+    recording = transfermarkt.recording_transport(
+        stub.transport(), RawResponseStore(connection), FetchAttemptStore(connection)
+    )
+    # The older season is fetched last: the latest response, not the latest season, holds
+    # a player's current club.
+    await fetch_squad(recording, CLUB_ID, "2025")
+    await fetch_squad(recording, CLUB_ID, "2024")
+
+    _dbt_build(database_url, tmp_path)
+
+    cursor = await connection.execute(
+        "SELECT player_id, current_club_id FROM staging.stg_transfermarkt__players"
+        " ORDER BY player_id"
+    )
+    assert await cursor.fetchall() == [
+        (101, TwoSeasonsStub.NEW_CLUB_ID),
+        (102, int(CLUB_ID)),
+        (103, int(CLUB_ID)),
     ]
 
 
