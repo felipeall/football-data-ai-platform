@@ -20,7 +20,6 @@ Football data platform: Temporal ingestion from scraped sources into Postgres, d
 - A new provider is done when it passes the shared runner conformance suite.
 - Chat runs the runner directly; Temporal is for ingestion and long-running jobs.
 - A new domain term goes into `GLOSSARY.md` in the same change.
-- Langfuse runs v4 in events-only mode: read traces through the v2 Observations API (`/api/public/v2/observations`); the legacy `/api/public/traces` endpoints answer with an error.
 
 ## Critical review
 
@@ -46,21 +45,26 @@ Two gates. Each ends in a written verdict, and the work moves on only after it.
 
 ## Branches and pull requests
 
-- `main` is always releasable. One branch per change, named `<type>/<short-description>` (`feat/sofascore-heatmaps`), branched from `main`.
+- `main` is always releasable. One branch per change, branched from `main`, in its own worktree. Name it `<type>/<short-description>` (`feat/sofascore-heatmaps`; `orca worktree create --branch`); Orca's default `felipeall/<slug>` is fine too, since squash-merging keeps branch names off `main`.
 - Pull request titles follow the commit format; squash-merge, so the title becomes the commit on `main`.
-- Open one pull request at a time, and start dependent work once it has merged.
+- Issues run in parallel when none has an open blocker (GitHub's native issue dependencies). Each gets one worktree, one branch and one pull request. Dependent work starts once its blocker has merged.
 - When a pull request must build on an unmerged one, retarget it to `main` (`gh pr edit <n> --base main`) before merging its base. Squash-merging with `--delete-branch` closes every pull request still based on the deleted branch, and GitHub refuses to reopen one whose branch was force-pushed since.
 - CI (`.github/workflows/ci.yml`) runs `ruff`, `pyright`, `pytest`, `import-linter` and `gitleaks` on every pull request and push to `main`. Merge only with all of them green, read from the run on the pull request's current head commit (`gh run list --branch <branch>`); a rebase or force-push starts a new run.
 - `main` is protected: merges go through a pull request, need all five checks green on a branch up to date with `main`, and keep history linear. Force-pushes, deletion and direct pushes are refused, admins included.
-- Write `Closes #N` only in pull request bodies: in a commit pushed straight to `main` it closes the issue on push, before its remaining criteria are met. After `gh issue reopen`, confirm the state with `gh issue view`.
+- Pull requests close their issues with `Closes #N` in the body, never in a commit message: a commit pushed straight to `main` closes the issue on push, before its remaining criteria are met. After `gh issue reopen`, confirm the state with `gh issue view`.
+
+## Worktrees and the shared stack
+
+Several agents work at once, each in an Orca worktree, against one local stack (Postgres, Temporal and the `worker` container). The main checkout owns the stack and the live database; a worktree gets its own database and task queue from `scripts/worktree.sh`. Before running tests, migrations, the CLI or a worker from a worktree, read `docs/agents/worktrees.md`.
 
 ## Progress
 
 Work is tracked in GitHub Issues, one GitHub milestone per roadmap milestone (M1–M7).
 
-- At session start: read the open issues of the current milestone (`gh issue list --milestone "<title>"`) and the latest comment on the issue you pick up.
+- At session start: read the open issues of the current milestone (`gh issue list --milestone "<title>"`) and the latest comment on the issue you pick up. Pick an issue with no open blocker and no assignee, then claim it with `gh issue edit <n> --add-assignee @me` before any other write.
 - At session end: comment on that issue with what was done, what is next, and any blockers.
-- Pull requests close their issues (`Closes #N`). When a milestone closes, update its row in the README roadmap.
+- A message to another agent's session states the state you leave behind: branch, head commit, and what is committed, pushed or uncommitted. Each worktree belongs to the agent working in it; change another agent's worktree only when that agent asks.
+- When a milestone closes, update its row in the README roadmap.
 
 ## Agent skills
 

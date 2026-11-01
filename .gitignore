@@ -5,6 +5,7 @@
 
 # Scraped data and Raw Responses — never committed (ADR 4)
 data/
+/data
 
 # Python
 __pycache__/
