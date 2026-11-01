@@ -6,7 +6,7 @@ The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that
 
 ## Setup
 
-`scripts/worktree.sh setup` prepares a worktree; Orca runs it as the repo's setup script on `worktree create`. Without it a worktree has no `.env`: settings fall back to defaults, and the database tests skip, reporting a pass. A `pytest` summary with skipped database tests means setup is missing.
+`scripts/worktree.sh setup` prepares a worktree. Orca runs it on `worktree create`, from `orca.yaml` at the repo root; `--setup skip` leaves it out, and then you run it by hand. Without it a worktree has no `.env`: settings fall back to defaults, and the database tests skip, reporting a pass. A `pytest` summary with skipped database tests means setup is missing.
 
 It does four things:
 
@@ -44,4 +44,4 @@ Live moves forward only from `main`: after a pull request merges, the main check
 
 ## Teardown
 
-`scripts/worktree.sh teardown` drops the worktree database and its test database. Orca runs it as the repo's archive script, before it removes the worktree.
+`scripts/worktree.sh teardown` drops the worktree database and its test database. Orca runs it from `orca.yaml` when the app removes a worktree; `orca worktree rm` runs it only with `--run-hooks`.
