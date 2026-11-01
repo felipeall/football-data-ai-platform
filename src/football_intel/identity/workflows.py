@@ -1,4 +1,4 @@
-"""Identity Resolution workflow. Deterministic: the work is one activity."""
+"""Identity workflows. Deterministic: the work of each is one activity."""
 
 from datetime import timedelta
 
@@ -6,7 +6,11 @@ from temporalio import workflow
 from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
-    from football_intel.identity.activities import IdentityActivities, IdentityResolutionResult
+    from football_intel.identity.activities import (
+        ClubResult,
+        IdentityActivities,
+        IdentityResolutionResult,
+    )
 
 
 @workflow.defn
@@ -19,5 +23,19 @@ class IdentityResolutionWorkflow:
         return await workflow.execute_activity_method(
             IdentityActivities.resolve_identities,
             start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=RetryPolicy(maximum_attempts=3),
+        )
+
+
+@workflow.defn
+class ClubWorkflow:
+    """Create and link the Clubs of the stored Matches' teams (ADR 34). Step 2 of the
+    Transform Run, between building staging and building the Club and Match marts."""
+
+    @workflow.run
+    async def run(self) -> ClubResult:
+        return await workflow.execute_activity_method(
+            IdentityActivities.create_clubs,
+            start_to_close_timeout=timedelta(minutes=5),
             retry_policy=RetryPolicy(maximum_attempts=3),
         )

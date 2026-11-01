@@ -30,8 +30,8 @@ EVENT_PAGES: dict[tuple[int, int], tuple[list[tuple[int, str]], bool]] = {
     (501, 1): ([(1003, "finished"), (1001, "finished")], False),
     (502, 0): ([(1001, "finished")], False),
 }
-# Home and away team per event, as Sofascore team IDs of real clubs, so the club seed maps
-# them: Arsenal (42) and Chelsea (38), each at home once.
+# Home and away team per event, as Sofascore team IDs of real clubs: Arsenal (42) and
+# Chelsea (38), each at home once. An event's round is its ID less 1000.
 EVENT_TEAMS = {1001: (42, 38), 1003: (38, 42), 1004: (42, 38), 1005: (38, 42)}
 PLAYED = (11, 12, 21, 22)
 BENCHED = 13
@@ -59,6 +59,7 @@ def _event(event_id: int, status: str) -> dict[str, Any]:
             "status": {"type": status},
             "tournament": {"uniqueTournament": {"id": TOURNAMENT_ID}},
             "season": {"id": SEASON_ID, "year": "24/25"},
+            "roundInfo": {"round": event_id - 1000},
             "startTimestamp": 1_735_689_600 + event_id,
             "homeTeam": {"id": EVENT_TEAMS.get(event_id, (42, 38))[0], "name": "Home FC"},
             "awayTeam": {"id": EVENT_TEAMS.get(event_id, (42, 38))[1], "name": "Away FC"},

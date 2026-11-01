@@ -8,7 +8,7 @@ from temporalio.worker import Worker
 
 from football_intel.config import Settings
 from football_intel.identity.activities import IdentityActivities
-from football_intel.identity.workflows import IdentityResolutionWorkflow
+from football_intel.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
 from football_intel.ingestion.activities import (
     SofascoreActivities,
     TransfermarktActivities,
@@ -54,6 +54,7 @@ async def run_worker(settings: Settings) -> None:
     understat_activities = UnderstatActivities(
         settings.database_url, SourceInterface(understat.SOURCE, settings.understat)
     )
+    identity = IdentityActivities(settings.database_url, settings.reep.release)
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
@@ -67,6 +68,7 @@ async def run_worker(settings: Settings) -> None:
             FixturesWorkflow,
             UnderstatIngestWorkflow,
             IdentityResolutionWorkflow,
+            ClubWorkflow,
         ],
         activities=[
             activities.ingest_club_squad,
@@ -78,7 +80,8 @@ async def run_worker(settings: Settings) -> None:
             match_activities.upcoming_fixtures,
             match_activities.match_status,
             understat_activities.ingest_season,
-            IdentityActivities(settings.database_url, settings.reep.release).resolve_identities,
+            identity.resolve_identities,
+            identity.create_clubs,
         ],
     )
     await worker.run()

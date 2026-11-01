@@ -10,22 +10,35 @@ models:
         data_tests: [not_null]
 
   - name: clubs
-    description: Canonical Clubs, with each source's ID.
+    description: >
+      Canonical Clubs (ADR 34), from `identity.clubs`, with each provider's ID from
+      `identity.club_links`. A Club linked to several IDs of one provider shows the lowest;
+      `marts.matches` links through all of them.
     columns:
       - name: club_id
         data_tests: [unique, not_null]
+      - name: name
+        data_tests: [not_null]
 
   - name: matches
     description: >
-      Canonical Matches across Sofascore and Understat, keyed by season, home Club and away
-      Club. A Match one source has not stored yet has that source's ID null.
+      Canonical Matches across Sofascore and Understat, keyed by Competition, season, Stage,
+      home Club and away Club (`premier-league:2025:league:arsenal:west-ham-united`). A Match
+      one source has not stored yet has that source's ID null. A Match whose Competition or
+      a team has no link is left out, and `warn_matches_left_out_of_the_marts` lists it.
     columns:
       - name: match_id
         data_tests: [unique, not_null]
+      - name: competition_id
+        data_tests: [not_null]
       - name: season
         data_tests: [not_null]
+      - name: stage_id
+        description: From the Stage links on Sofascore's round, else the Competition's default.
+        data_tests: [not_null]
+      - name: round
+        description: Sofascore's round number; null for a Match only Understat has.
       - name: home_club_id
-        description: Null when a source's club is missing from the club seed.
         data_tests:
           - not_null
           - relationships:
@@ -43,3 +56,18 @@ models:
         data_tests: [unique]
       - name: understat_match_id
         data_tests: [unique]
+
+  - name: match_id_aliases
+    description: >
+      Former Match IDs, built from a Club's former slugs, and the Match each resolves to.
+      Empty until a Club is renamed.
+    columns:
+      - name: alias
+        data_tests: [unique, not_null]
+      - name: match_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('matches')
+                field: match_id

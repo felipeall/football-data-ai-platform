@@ -13,7 +13,8 @@ from temporalio.client import Client
 
 from football_intel.config import Settings
 from football_intel.fetch_attempts import FetchAttemptStore, SuccessRate
-from football_intel.identity.workflows import IdentityResolutionWorkflow
+from football_intel.identity.store import ClubStore, ClubTaken
+from football_intel.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
 from football_intel.ingestion.models import (
     BackfillInput,
     CompetitionSquadsInput,
@@ -185,6 +186,35 @@ async def resolve_identities(settings: Settings) -> None:
     )
     for count in result.candidates:
         print(f"  {count.source:<13} {count.method:<17} {count.status:<9} {count.count:>5}")
+
+
+async def create_clubs(settings: Settings) -> None:
+    client = await _client(settings)
+    result = await client.execute_workflow(
+        ClubWorkflow.run, id="create-clubs", task_queue=settings.temporal_task_queue
+    )
+    print(
+        f"Clubs (Reep {result.reep_release}): {len(result.created)} created, "
+        f"{result.links_added} links added, {result.clubs} Clubs in all"
+    )
+    for club_id in result.created:
+        print(f"  created {club_id}")
+    if result.unresolved:
+        print(f"{len(result.unresolved)} teams have no Club; their Matches stay out of the marts:")
+    for team in result.unresolved:
+        print(f"  {team.provider} {team.external_id} ({team.name}): {team.reason}")
+
+
+async def rename_club(settings: Settings, club_id: str, new_id: str) -> None:
+    async with (
+        await AsyncConnection.connect(settings.database_url) as conn,
+        conn.transaction(),
+    ):
+        try:
+            await ClubStore(conn).rename(club_id, new_id)
+        except ClubTaken as error:
+            raise SystemExit(str(error)) from error
+    print(f"Renamed {club_id} to {new_id}; {club_id} stays as an alias. Rebuild the marts.")
 
 
 REEP_DATA = Path("data/reep")
@@ -405,6 +435,15 @@ def main() -> None:
         help="download, verify and load the pinned Reep release's person and team bridges",
     )
     commands.add_parser(
+        "create-clubs",
+        help="create and link the Clubs of the stored Matches' teams; run after dbt staging",
+    )
+    rename = commands.add_parser(
+        "rename-club", help="give a Club a new ID; the old one stays as an alias"
+    )
+    rename.add_argument("club_id", help="the Club's current ID, e.g. wolverhampton-wanderers")
+    rename.add_argument("new_id", help="the new ID, e.g. wolves")
+    commands.add_parser(
         "resolve-identities",
         help="link staged Source Records to Players; run after dbt builds staging and marts",
     )
@@ -438,6 +477,10 @@ def main() -> None:
         asyncio.run(reep_status(settings))
     elif args.command == "load-reep":
         asyncio.run(load_reep(settings))
+    elif args.command == "create-clubs":
+        asyncio.run(create_clubs(settings))
+    elif args.command == "rename-club":
+        asyncio.run(rename_club(settings, args.club_id, args.new_id))
     elif args.command == "resolve-identities":
         asyncio.run(resolve_identities(settings))
     elif args.command == "schedule-understat":
