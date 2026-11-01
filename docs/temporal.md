@@ -121,9 +121,9 @@ Each source has its own retry policy in `workflows.py`, all with the same polite
 | `complete_matches` (replays stored Matches) | 30 min | 1 min | Sofascore policy |
 | `match_status` | 2 min | — | Sofascore policy |
 | `ingest_season` (Understat, ~380 requests) | 1 h | 1 min | Understat policy |
-| `create_clubs` | 5 min | — | 3 attempts |
-| `resolve_identities` | 10 min | — | 3 attempts |
-| `build_dbt` | 30 min | — | 3 attempts; a failed model or test (exit 1) none |
+| `create_clubs` | 5 min | — | 3 attempts, 10 s then 20 s apart |
+| `resolve_identities` | 10 min | — | 3 attempts, 10 s then 20 s apart |
+| `build_dbt` | 30 min | — | 3 attempts, 10 s then 20 s apart; a failed model or test (exit 1) none, unless every failure is a lost database connection |
 
 Long activities heartbeat on every request. A dead worker is then noticed within a minute instead of at the end of the start-to-close timeout.
 
@@ -280,7 +280,7 @@ flowchart LR
     D --> E["build_dbt<br/>the rest"]
 ```
 
-- `build_dbt` runs `dbt build` as a subprocess of the worker, with the step's selection and `--indirect-selection cautious`, so each test runs in the step that builds the last of its parents. dbt writes its target and logs to a temporary directory. Exit 1, a failed model or test, fails non-retryably; a cancelled attempt kills its dbt.
+- `build_dbt` runs `dbt build` as a subprocess of the worker, with the step's selection and `--indirect-selection cautious`, so each test runs in the step that builds the last of its parents. dbt writes its target and logs to a temporary directory. Exit 1, a failed model or test, fails non-retryably, unless every failed node in this build's `run_results.json` failed on a lost database connection (`CONNECTION_ERRORS` in `transform/dbt.py`); then it is retried. A cancelled attempt kills its dbt.
 - `create_clubs` creates and links the Clubs of the stored Matches' teams from the pinned Reep release, named after the Transfermarkt club. Without `REEP__RELEASE` it fails non-retryably.
 - `resolve_identities` creates Players and links the staged Source Records to them.
 
