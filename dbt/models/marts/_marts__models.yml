@@ -81,6 +81,24 @@ models:
         data_tests: [not_null]
       - name: started
         data_tests: [not_null]
+      - name: passes
+        description: >
+          Sofascore's `totalPass`. Crosses are not included: they are in `crosses`. It
+          matches the Appearance's `pass` Actions in `actions`, to within a pass or two.
+          The Style Profile's passing features use `passes` and `crosses` as two separate
+          counts; a feature that counts every pass attempt adds the two.
+      - name: accurate_passes
+        description: >
+          Sofascore's `accuratePass`: the completed passes among `passes`, crosses not
+          included. It matches the Appearance's successful `pass` Actions.
+      - name: crosses
+        description: >
+          Sofascore's `totalCross`, which `passes` does not count. It matches the
+          Appearance's `cross` Actions exactly.
+      - name: accurate_crosses
+        description: >
+          Sofascore's `accurateCross`: the completed crosses among `crosses`. It matches the
+          Appearance's successful `cross` Actions exactly.
 
   - name: actions
     description: >
@@ -125,6 +143,11 @@ models:
               arguments:
                 values: [passes, dribbles, ball-carries, defensive]
       - name: action_type
+        description: >
+          Sofascore's `eventActionType`. In the `passes` category, `pass` Actions match
+          `appearances.passes` and `cross` Actions match `appearances.crosses`. The
+          category's other types (`ball-touch`, `miss`, `throw-in`) are counted in neither.
+          A pass feature filters on `action_type`, not on `category`.
         data_tests: [not_null]
       - name: outcome
         description: Whether the Action succeeded; null for a ball carry.
