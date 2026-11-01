@@ -282,7 +282,7 @@ flowchart LR
 
 - `build_dbt` runs `dbt build` as a subprocess of the worker, with the step's selection and `--indirect-selection cautious`, so each test runs in the step that builds the last of its parents. dbt writes its target and logs to a temporary directory. Exit 1, a failed model or test, fails non-retryably, unless every failed node in this build's `run_results.json` failed on a lost database connection (`CONNECTION_ERRORS` in `transform/dbt.py`); then it is retried. A cancelled attempt kills its dbt.
 - `create_clubs` creates and links the Clubs of the stored Matches' teams from the pinned Reep release, named after the Transfermarkt club. Without `REEP__RELEASE` it fails non-retryably.
-- `resolve_identities` creates Players and links the staged Source Records to them.
+- `resolve_identities` creates Players and links the staged Source Records to them. It returns the Sofascore and Understat records left unlinked that played in the covered Season (`COVERED_SEASON`, ADR 35).
 
 Each is one transaction or one dbt build, so a retried step starts clean. A team or player that links to nothing is in the result, never a failure. The result carries each step's time, measured with `workflow.now()`.
 

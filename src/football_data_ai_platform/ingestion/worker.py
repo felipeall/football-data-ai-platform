@@ -55,7 +55,9 @@ async def run_worker(settings: Settings) -> None:
     understat_activities = UnderstatActivities(
         settings.database_url, SourceInterface(understat.SOURCE, settings.understat)
     )
-    identity = IdentityActivities(settings.database_url, settings.reep.release)
+    identity = IdentityActivities(
+        settings.database_url, settings.reep.release, covered_season=settings.covered_season
+    )
     dbt = DbtActivities(settings.database_url)
     worker = Worker(
         client,

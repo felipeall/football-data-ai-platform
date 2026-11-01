@@ -34,6 +34,8 @@ class Settings(BaseSettings):
     sofascore: SofascorePolicy = SofascorePolicy()
     understat: SourcePolicy = SourcePolicy()
     reep: ReepSettings = ReepSettings()
+    # The Season the PoC covers, by its start year (ADR 35): 2025 is 25/26.
+    covered_season: int = 2025
 
     @property
     def database_url(self) -> str:

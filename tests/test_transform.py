@@ -50,7 +50,7 @@ class Stubs:
     @activity.defn(name="resolve_identities")
     async def resolve_identities(self) -> IdentityResolutionResult:
         self.calls.append(("resolve_identities",))
-        return IdentityResolutionResult("test", 1, 1, [], [UNLINKED_PLAYER], [])
+        return IdentityResolutionResult("test", 2025, 1, 1, [], [UNLINKED_PLAYER], [])
 
     def worker(self, env: WorkflowEnvironment, task_queue: str) -> Worker:
         return Worker(

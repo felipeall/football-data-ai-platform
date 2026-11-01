@@ -42,6 +42,8 @@ from tests.transfermarkt_stub import ATTRIBUTES, CLUB_ID, PLAYERS, SEASON_ID, Tr
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
 
 DBT_PROJECT = Path(__file__).parent.parent / "dbt"
+# The stubs' Matches are 24/25.
+COVERED_SEASON = 2024
 
 
 def _dbt_build(
@@ -221,7 +223,9 @@ async def _create_clubs(
     """Steps 1 and 2 of the Transform Run: dbt staging, then the Club step."""
     await _store_reep_teams_and_club_names(connection, bridges)
     _dbt_build(database_url, tmp_path, "--select", "staging")
-    return await ActivityEnvironment().run(IdentityActivities(database_url, "test").create_clubs)
+    return await ActivityEnvironment().run(
+        IdentityActivities(database_url, "test", covered_season=COVERED_SEASON).create_clubs
+    )
 
 
 # The stub's events all kick off on 1 January; these are Understat's kickoffs of the same
@@ -286,7 +290,9 @@ async def test_dbt_links_matches_across_sources_by_competition_season_and_clubs(
     ]
 
     # A re-run creates nothing and changes nothing.
-    again = await ActivityEnvironment().run(IdentityActivities(database_url, "test").create_clubs)
+    again = await ActivityEnvironment().run(
+        IdentityActivities(database_url, "test", covered_season=COVERED_SEASON).create_clubs
+    )
     assert (again.created, again.links_added, again.clubs) == ([], 0, 2)
 
 
@@ -517,6 +523,56 @@ async def test_dbt_fails_when_a_candidate_s_source_record_is_not_staged(
     ), result.stdout[-4000:]
 
 
+async def test_identity_lists_only_the_unlinked_records_that_played_in_the_covered_season(
+    connection: AsyncConnection[Any], database_url: str, tmp_path: Path
+) -> None:
+    await _store_both_sources(connection, 1001, 1003)
+    recording = understat.recording_transport(
+        UnderstatStub().transport(), RawResponseStore(connection), FetchAttemptStore(connection)
+    )
+    await understat_league.fetch_match(recording, 1)
+    # Match 1003 moves to 25/26, without player 22, who then played in 24/25 only.
+    await connection.execute(
+        "UPDATE raw.raw_responses SET body_json = jsonb_set(body_json, '{event,season,year}',"
+        " '\"25/26\"') WHERE url LIKE '%/event/1003'"
+    )
+    await connection.execute(
+        "UPDATE raw.raw_responses SET body_json = jsonb_set(body_json, '{away,players}',"
+        " (SELECT jsonb_agg(entry) FROM jsonb_array_elements(body_json -> 'away' -> 'players')"
+        " AS entry WHERE entry -> 'player' ->> 'id' <> '22'))"
+        " WHERE url LIKE '%/event/1003/lineups'"
+    )
+    await _create_clubs(connection, database_url, tmp_path)
+    await ActivityEnvironment().run(
+        DbtActivities(database_url, DBT_PROJECT).build_dbt, CLUBS_AND_MATCHES
+    )
+
+    async def unlinked(covered_season: int) -> list[tuple[str, int, int]]:
+        identity = IdentityActivities(database_url, "test", covered_season=covered_season)
+        result = await ActivityEnvironment().run(identity.resolve_identities)
+        assert result.covered_season == covered_season
+        return [(r.source, r.source_record_id, r.minutes) for r in result.unlinked]
+
+    # No Transfermarkt squad is stored, so no record links. In 25/26 only Sofascore 1003 was
+    # played: 22 and the Understat players played in 24/25 only, and 13 never played.
+    assert await unlinked(2025) == [
+        ("sofascore", 11, 90),
+        ("sofascore", 12, 90),
+        ("sofascore", 21, 90),
+    ]
+    # Each source's minutes count only the covered Season's Matches.
+    assert await unlinked(2024) == [
+        ("sofascore", 11, 90),
+        ("sofascore", 12, 90),
+        ("sofascore", 21, 90),
+        ("sofascore", 22, 4),
+        ("understat", 801, 90),
+        ("understat", 802, 75),
+        ("understat", 803, 90),
+        ("understat", 804, 15),
+    ]
+
+
 async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
     temporal: WorkflowEnvironment, connection: AsyncConnection[Any], database_url: str
 ) -> None:
@@ -524,7 +580,7 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
     await connection.execute("DROP SCHEMA IF EXISTS staging, marts CASCADE")
     await _store_both_sources(connection, 1001, 1003)
     await _store_reep_teams_and_club_names(connection)
-    identity = IdentityActivities(database_url, "test")
+    identity = IdentityActivities(database_url, "test", covered_season=COVERED_SEASON)
     task_queue = f"test-{uuid.uuid4()}"
     async with Worker(
         temporal.client,
