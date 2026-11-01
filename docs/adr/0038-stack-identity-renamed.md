@@ -11,7 +11,7 @@ The Compose project name prefixes every volume. Renaming the project alone would
 - **No trace of the working name stays** in code, configuration, docs or the live stack.
 - **The Compose project is `football-data-ai-platform`.** Volumes are migrated, not pinned: the stack is stopped, `docker compose create` makes the new volumes, and each old volume's contents are copied into its new one. The old volumes are kept, untouched, until the migrated stack is verified, and are then removed.
 - **The Postgres database and role are `football_data_ai_platform`.** They are renamed in place (`ALTER DATABASE … RENAME`, `ALTER ROLE … RENAME`), with no other connections open, by a temporary superuser that is dropped afterwards. The role keeps its SCRAM password.
-- **Worktree databases are `football_data_ai_platform_wt_<slug>`.** The prefix grows to 29 characters, so the slug is cut to 19. That keeps 15 characters for test suffixes under Postgres's 63-byte limit (#85).
+- **Worktree databases are `football_data_ai_platform_wt_<slug>`.** The prefix grows to 29 characters, so the slug is cut to 19: the folder name's first 13 characters and 5 of its hash, so folders that start alike no longer share a database and task queue. That keeps 15 characters for test suffixes under Postgres's 63-byte limit (#85).
 - **The dbt project and profile are `football_data_ai_platform`.** Relations do not change, because schemas come from the profile and `+schema`.
 - **Langfuse starts fresh as `football-data-ai-platform`.** Its `LANGFUSE_INIT_*` values apply only on first start, so its volumes are not migrated: they are recreated empty, and the trace history is dropped. Nothing traces to Langfuse yet, so the history holds only smoke tests.
 

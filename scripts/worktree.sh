@@ -21,7 +21,11 @@ fi
 
 # Postgres truncates names at 63 bytes. 29 + 19 leaves 15 for suffixes a test adds to
 # the database name (`_test` from tests/conftest.py, then a migration test's own).
-slug=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | cut -c1-19)
+# The slug is the folder name's first 13 characters plus 5 of its hash, so two
+# folders that start alike still get their own database and task queue.
+folder=$(basename "$worktree")
+hash=$(printf '%s' "$folder" | git hash-object --stdin | cut -c1-5)
+slug="$(printf '%s' "$folder" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_' | cut -c1-13)_${hash}"
 database="football_data_ai_platform_wt_${slug}"
 queue="wt-${slug}"
 

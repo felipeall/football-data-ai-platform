@@ -10,7 +10,7 @@ The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that
 
 It does four things:
 
-- writes `.env`: a copy of the main checkout's, with `POSTGRES_DB=football_data_ai_platform_wt_<slug>` and `TEMPORAL_TASK_QUEUE=wt-<slug>`, the slug taken from the worktree's folder name;
+- writes `.env`: a copy of the main checkout's, with `POSTGRES_DB=football_data_ai_platform_wt_<slug>` and `TEMPORAL_TASK_QUEUE=wt-<slug>`, the slug being the first 13 characters of the worktree's folder name plus 5 of its hash, so folders that start alike do not share a database;
 - links `data/` to the main checkout's (Reep releases and other scraped files);
 - runs `uv sync`;
 - creates the worktree database, empty, when Postgres is up.
