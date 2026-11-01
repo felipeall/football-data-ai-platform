@@ -13,7 +13,7 @@ The raw schema (Raw Responses, ADR 28) needs versioned, repeatable schema change
 ## Decision
 - Alembic manages the schema of the application database. Migrations live in `migrations/versions/`, numbered `0001_…`, `0002_…`.
 - Migrations are plain SQL through `op.execute`. There are no ORM models and no autogenerate; application code talks to Postgres through `psycopg`.
-- Alembic reads the connection from `football_intel.config.Settings` (the `.env` variables), unless `sqlalchemy.url` is set explicitly, as the test fixtures do.
+- Alembic reads the connection from `football_data_ai_platform.config.Settings` (the `.env` variables), unless `sqlalchemy.url` is set explicitly, as the test fixtures do.
 - In compose, a one-shot `migrate` service runs `alembic upgrade head`; the worker starts only after it succeeds.
 - Ingestion-owned tables live in the `raw` schema. dbt models (staging, marts) are not migrations.
 

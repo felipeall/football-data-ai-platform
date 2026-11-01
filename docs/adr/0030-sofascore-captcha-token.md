@@ -132,7 +132,7 @@ Neither soak saw the challenge come back.
 ## Verified with the implementation (2026-10-14)
 - **On macOS**, the real Token Provider over `ImpersonatingTransport` obtained a token on the first challenged request in about 20 seconds. Three API calls answered 200.
 - **In the worker image**, it obtained a token 3/3, in 7–10 seconds.
-- **Through the worker**, `football-intel ingest-match 16363244`, a Match challenged on 2026-10-13, stored 66 Raw Responses, all 200, with one token obtained.
+- **Through the worker**, `fdap ingest-match 16363244`, a Match challenged on 2026-10-13, stored 66 Raw Responses, all 200, with one token obtained.
 - **No leaks.** No Raw Response, Fetch Attempt or log line contains the token.
 
 ### Low-reputation IPs (observed 2026-10-19)

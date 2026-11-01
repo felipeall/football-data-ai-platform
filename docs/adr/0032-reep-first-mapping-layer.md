@@ -40,14 +40,14 @@ Reep publishes data releases on `data.reep.football`, named by a stamp such as `
 
 **Where a release's files are.** Each release has a file list, `https://data.reep.football/releases/<stamp>/release.json`. Under `files`, it gives every file of the release (the manifest included) a `key`, a `sha256` and a size in `bytes`. The files are served from `https://data.reep.football/<key>`, under `releases/<stamp>/objects/<id>/`. Older releases are served this way too. The flat paths `releases/<stamp>/<file>` answer 404 since October 2026.
 
-**Checking for a new release: `football-intel reep-status`.** It downloads only small JSON files, never the bridges:
+**Checking for a new release: `fdap reep-status`.** It downloads only small JSON files, never the bridges:
 
 1. `https://data.reep.football/releases/latest.json`: its `stamp` is the current release.
 2. The manifest of each release from the pinned one up to the current one, found through that release's file list (above). Each manifest's `diff` describes the change from its predecessor: new bridges per provider, entity deltas, ID retention, redirects, and the gate result.
 
 It prints the pinned release, the releases loaded into the database, the current release, and the changes in between for Sofascore, Transfermarkt and Understat. That is enough to decide whether an upgrade is worth the download.
 
-**Downloading and loading: `football-intel load-reep`.** For the pinned release, it:
+**Downloading and loading: `fdap load-reep`.** For the pinned release, it:
 
 1. **Reads the file list** at `https://data.reep.football/releases/<tag>/release.json`. A file it does not list, or one keyed outside `releases/<tag>/`, stops the command.
 2. **Fetches the manifest** from its key, checks it against the list's SHA-256, and keeps it, byte for byte, as `data/reep/<tag>/manifest.json`.

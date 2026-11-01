@@ -19,16 +19,20 @@ if [[ "$worktree" == "$main" ]]; then
     exit 1
 fi
 
-# Postgres truncates names at 63 bytes. 18 + 30 leaves 15 for suffixes a test adds to
+# Postgres truncates names at 63 bytes. 29 + 19 leaves 15 for suffixes a test adds to
 # the database name (`_test` from tests/conftest.py, then a migration test's own).
-slug=$(basename "$worktree" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_' | cut -c1-30)
-database="football_intel_wt_${slug}"
+# The slug is the folder name's first 13 characters plus 5 of its hash, so two
+# folders that start alike still get their own database and task queue.
+folder=$(basename "$worktree")
+hash=$(printf '%s' "$folder" | git hash-object --stdin | cut -c1-5)
+slug="$(printf '%s' "$folder" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_' | cut -c1-13)_${hash}"
+database="football_data_ai_platform_wt_${slug}"
 queue="wt-${slug}"
 
 # A worktree set up earlier keeps the names its .env already holds, so teardown
 # drops the database it actually has.
 if [[ -f "$worktree/.env" ]]; then
-    existing=$(sed -n 's/^POSTGRES_DB=\(football_intel_wt_[a-z0-9_]*\)$/\1/p' "$worktree/.env" | tail -1)
+    existing=$(sed -n 's/^POSTGRES_DB=\(football_data_ai_platform_wt_[a-z0-9_]*\)$/\1/p' "$worktree/.env" | tail -1)
     if [[ -n "$existing" ]]; then
         database=$existing
         queue=$(sed -n 's/^TEMPORAL_TASK_QUEUE=\(wt-[a-z0-9_]*\)$/\1/p' "$worktree/.env" | tail -1)

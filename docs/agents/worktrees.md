@@ -1,8 +1,8 @@
 # Worktrees and the shared stack
 
-Several agents work at once, each in an Orca worktree under `~/orca/workspaces/football-data-ai-platform/`. They share one local stack: `compose.yaml` fixes the project name `football-intel`, so every checkout talks to the same Postgres, Temporal and `worker` container.
+Several agents work at once, each in an Orca worktree under `~/orca/workspaces/football-data-ai-platform/`. They share one local stack: `compose.yaml` fixes the project name `football-data-ai-platform`, so every checkout talks to the same Postgres, Temporal and `worker` container.
 
-The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that stack and the **live** database `football_intel`. The `worker` container runs `main`'s code against live, on the `ingestion` task queue. A **worktree** works against its own database and task queue, so its branch code never reaches live data or the live worker.
+The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that stack and the **live** database `football_data_ai_platform`. The `worker` container runs `main`'s code against live, on the `ingestion` task queue. A **worktree** works against its own database and task queue, so its branch code never reaches live data or the live worker.
 
 ## Setup
 
@@ -10,7 +10,7 @@ The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that
 
 It does four things:
 
-- writes `.env`: a copy of the main checkout's, with `POSTGRES_DB=football_intel_wt_<slug>` and `TEMPORAL_TASK_QUEUE=wt-<slug>`, the slug taken from the worktree's folder name;
+- writes `.env`: a copy of the main checkout's, with `POSTGRES_DB=football_data_ai_platform_wt_<slug>` and `TEMPORAL_TASK_QUEUE=wt-<slug>`, the slug being the first 13 characters of the worktree's folder name plus 5 of its hash, so folders that start alike do not share a database;
 - links `data/` to the main checkout's (Reep releases and other scraped files);
 - runs `uv sync`;
 - creates the worktree database, empty, when Postgres is up.
@@ -19,7 +19,7 @@ It does four things:
 
 ## Tests
 
-`uv run pytest` builds `<worktree database>_test`, so parallel worktrees each get their own test database. The main checkout's tests use `football_intel_test`.
+`uv run pytest` builds `<worktree database>_test`, so parallel worktrees each get their own test database. The main checkout's tests use `football_data_ai_platform_test`.
 
 ## Live checks
 

@@ -34,14 +34,14 @@ Identity Resolution also sits between dbt's layers. It reads Source Records from
 - **Only one Transform Run at a time.** The workflow has a fixed ID, `transform`, and is started only through a Schedule with overlap policy `SKIP` or a CLI command. A start while a run is going joins that run instead of starting a second one.
 - **When it runs:**
   - daily, from a Schedule, after the night's post-match ingests;
-  - on demand, from `football-intel transform`, for example after a backfill.
+  - on demand, from `fdap transform`, for example after a backfill.
 
   Ingest workflows no longer start dbt.
 - **Human review stays outside the run.** The LLM judge and review signals (ADR 6) act on Identity Candidates in the `identity` schema whenever they arrive. The next Transform Run carries their decisions into the marts.
 
 ## Consequences
 
-- Marts lag ingestion by up to a day, unless `football-intel transform` is run. No consumer needs fresher data: the agent answers scouting questions, not live ones.
+- Marts lag ingestion by up to a day, unless `fdap transform` is run. No consumer needs fresher data: the agent answers scouting questions, not live ones.
 - Accepted links and Player IDs survive any dbt rebuild, and a full refresh of the marts is always safe.
 - The `identity` schema is backed up and migrated like `raw`. It is the only place human review decisions live.
 - Tests:

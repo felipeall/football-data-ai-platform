@@ -1,13 +1,13 @@
 # Connection from the POSTGRES_* environment variables; no credentials in the repository.
-football_intel:
+football_data_ai_platform:
   target: default
   outputs:
     default:
       type: postgres
       host: "{{ env_var('POSTGRES_HOST', 'localhost') }}"
       port: "{{ env_var('POSTGRES_PORT', '5432') | int }}"
-      dbname: "{{ env_var('POSTGRES_DB', 'football_intel') }}"
-      user: "{{ env_var('POSTGRES_USER', 'football_intel') }}"
+      dbname: "{{ env_var('POSTGRES_DB', 'football_data_ai_platform') }}"
+      user: "{{ env_var('POSTGRES_USER', 'football_data_ai_platform') }}"
       password: "{{ env_var('POSTGRES_PASSWORD', '') }}"
       schema: public
       threads: 4
