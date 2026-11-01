@@ -1,7 +1,8 @@
 {
   "enabledPlugins": {
     "temporal@temporal-marketplace": true,
-    "pydantic@pydantic-skills": true
+    "pydantic@pydantic-skills": true,
+    "dbt@dbt-agent-marketplace": true
   },
   "extraKnownMarketplaces": {
     "temporal-marketplace": {
@@ -14,6 +15,12 @@
       "source": {
         "source": "github",
         "repo": "pydantic/skills"
+      }
+    },
+    "dbt-agent-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "dbt-labs/dbt-agent-skills"
       }
     }
   }

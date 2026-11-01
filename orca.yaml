@@ -1,0 +1,4 @@
+# Orca hooks: give each worktree its own database and task queue (docs/agents/worktrees.md).
+scripts:
+  setup: scripts/worktree.sh setup
+  archive: scripts/worktree.sh teardown
