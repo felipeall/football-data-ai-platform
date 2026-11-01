@@ -91,7 +91,10 @@ def upgrade() -> None:
         """
     )
     # A range of a provider's round numbers that belongs to one Stage. A Match whose round
-    # no link covers takes its Competition's default Stage.
+    # no link covers takes its Competition's default Stage. Ranges apply to every season and
+    # never overlap, so a round names at most one Stage; `btree_gist` lets one constraint
+    # compare the text keys and the ranges.
+    op.execute("CREATE EXTENSION IF NOT EXISTS btree_gist")
     op.execute(
         """
         CREATE TABLE identity.stage_links (
@@ -102,7 +105,12 @@ def upgrade() -> None:
             last_round     int  NOT NULL,
             PRIMARY KEY (competition_id, provider, first_round),
             FOREIGN KEY (competition_id, stage_id) REFERENCES identity.stages,
-            CHECK (first_round <= last_round)
+            CHECK (first_round <= last_round),
+            CONSTRAINT stage_links_rounds_do_not_overlap EXCLUDE USING gist (
+                competition_id WITH =,
+                provider WITH =,
+                int4range(first_round, last_round, '[]') WITH &&
+            )
         )
         """
     )
@@ -127,6 +135,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # `btree_gist` stays: other objects may use it.
     op.execute(
         "DROP TABLE identity.stage_links, identity.stages, identity.competition_links,"
         " identity.competitions, identity.club_links, identity.club_aliases, identity.clubs"

@@ -161,7 +161,7 @@ dbt reads the connection from the `POSTGRES_*` variables, so `--env-file .env` p
 
 Clubs, Competitions and Stages have our own IDs, kept in `identity` ([ADR 34](docs/adr/0034-canonical-ids-are-ours.md)):
 
-- **Competitions and Stages** are entered by hand, in a migration, when we take one on. The Premier League is `premier-league` (Sofascore 17, Understat `EPL`, Transfermarkt `GB1`), with one Stage, `league`. A Stage link can map a range of Sofascore round numbers to another Stage.
+- **Competitions and Stages** are entered by hand, in a migration, when we take one on. The Premier League is `premier-league` (Sofascore 17, Understat `EPL`, Transfermarkt `GB1`), with one Stage, `league`. A Stage link can map a range of Sofascore round numbers to another Stage. Ranges never overlap, and apply to every season: a cup that renumbers its rounds by season would need a season on the link.
 - **`create-clubs`** gives a Club to every team in the stored Matches of those Competitions. The pinned Reep release's team bridges link the team, and the Reep team creates the Club the first time we see it. The Club ID is a slug of its Transfermarkt name: ASCII, `&` as `and`, apostrophes and dots dropped, the words `fc`, `afc` and `cf` dropped (`AFC Bournemouth` is `bournemouth`, `Brighton & Hove Albion` is `brighton-and-hove-albion`). A slug already taken gets the country appended (`-england`). A re-run creates nothing for teams already linked, and never moves a link. A team without a Reep team, or whose Reep team has no Transfermarkt name, gets no Club: the command lists it and why.
 - **`rename-club <club> <new-slug>`** renames a Club. The former slug stays as an alias, and `marts.match_id_aliases` resolves the Match IDs built from it.
 

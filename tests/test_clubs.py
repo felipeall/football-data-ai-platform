@@ -1,8 +1,12 @@
 from typing import Any
 
+import psycopg
 import pytest
 from psycopg import AsyncConnection
+from temporalio.exceptions import ApplicationError
+from temporalio.testing import ActivityEnvironment
 
+from football_intel.identity.activities import IdentityActivities
 from football_intel.identity.clubs import (
     ClubPlan,
     Team,
@@ -187,3 +191,44 @@ async def test_a_rename_to_a_taken_or_invalid_slug_is_refused(
 
     with pytest.raises(ClubTaken):
         await store.rename("arsenal", new_id)
+
+
+async def test_stage_links_refuse_overlapping_round_ranges(
+    connection: AsyncConnection[Any],
+) -> None:
+    await connection.execute(
+        "INSERT INTO identity.stages (competition_id, stage_id, name) VALUES"
+        " ('premier-league', 'first-half', 'First half'),"
+        " ('premier-league', 'second-half', 'Second half')"
+    )
+    insert = (
+        "INSERT INTO identity.stage_links (competition_id, stage_id, provider, first_round,"
+        " last_round) VALUES ('premier-league', %s, 'sofascore', %s, %s)"
+    )
+    try:
+        await connection.execute(insert, ("first-half", 1, 19))
+        await connection.execute(insert, ("second-half", 20, 38))  # adjacent is fine
+        with pytest.raises(psycopg.errors.ExclusionViolation):
+            await connection.execute(insert, ("second-half", 19, 19))
+    finally:
+        await connection.execute("DELETE FROM identity.stage_links")
+        await connection.execute(
+            "DELETE FROM identity.stages WHERE stage_id IN ('first-half', 'second-half')"
+        )
+
+
+@pytest.mark.parametrize(
+    ("release", "error_type"),
+    [(None, "ReepReleaseNotSet"), ("never-loaded", "ReepReleaseNotLoaded")],
+)
+async def test_creating_clubs_needs_the_pinned_reep_release_loaded(
+    connection: AsyncConnection[Any], database_url: str, release: str | None, error_type: str
+) -> None:
+    activities = IdentityActivities(database_url, release)
+
+    with pytest.raises(ApplicationError) as raised:
+        await ActivityEnvironment().run(activities.create_clubs)
+
+    assert (raised.value.type, raised.value.non_retryable) == (error_type, True)
+    cursor = await connection.execute("SELECT count(*) FROM identity.clubs")
+    assert await cursor.fetchone() == (0,)

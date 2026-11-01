@@ -12,7 +12,8 @@ models:
   - name: clubs
     description: >
       Canonical Clubs (ADR 34), from `identity.clubs`, with each provider's ID from
-      `identity.club_links`.
+      `identity.club_links`. A Club linked to several IDs of one provider shows the lowest;
+      `marts.matches` links through all of them.
     columns:
       - name: club_id
         data_tests: [unique, not_null]
