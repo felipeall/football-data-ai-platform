@@ -80,6 +80,49 @@ def test_sofascore_leaves_two_same_named_players_to_the_judge() -> None:
     assert not proposal.accepted
 
 
+def test_sofascore_links_the_same_name_born_a_day_apart() -> None:
+    # Omari Hutchinson: Sofascore 2003-10-29, Transfermarkt 2003-10-30.
+    transfermarkt = {1: SourcePlayer(741238, "Omari Hutchinson", date(2003, 10, 30))}
+
+    (proposal,) = sofascore_proposals(
+        [SourcePlayer(1090963, "Omari Hutchinson", date(2003, 10, 29))], transfermarkt
+    )
+
+    assert (proposal.player, proposal.method, proposal.accepted) == (
+        1,
+        Method.NAME_BIRTH_DATE,
+        True,
+    )
+    assert proposal.evidence["birth_date_gap_days"] == 1
+
+
+def test_sofascore_does_not_link_the_same_name_born_two_days_apart() -> None:
+    transfermarkt = {1: SourcePlayer(10, "Joe Smith", date(1999, 5, 3))}
+
+    assert sofascore_proposals([SourcePlayer(5, "Joe Smith", BORN)], transfermarkt) == []
+
+
+def test_sofascore_records_no_gap_for_the_same_birth_date() -> None:
+    (proposal,) = sofascore_proposals(
+        [SourcePlayer(5, "Joe Smith", BORN)], {1: SourcePlayer(10, "Joe Smith", BORN)}
+    )
+
+    assert proposal.evidence["birth_date_gap_days"] == 0
+
+
+def test_sofascore_leaves_two_same_named_players_a_day_apart_to_the_judge() -> None:
+    # The exact birth date alone would link; a same-named record a day off makes it
+    # ambiguous, so the judge decides, proposed the exact-date record first.
+    transfermarkt = {
+        1: SourcePlayer(10, "Joe Smith", date(1999, 4, 30)),
+        2: SourcePlayer(11, "Joe Smith", BORN),
+    }
+
+    (proposal,) = sofascore_proposals([SourcePlayer(5, "Joe Smith", BORN)], transfermarkt)
+
+    assert (proposal.player, proposal.method, proposal.accepted) == (2, Method.FUZZY, False)
+
+
 # Sofascore players 1 and 2 link to Players 501 and 502.
 LINKED = {1: 501, 2: 502}
 
