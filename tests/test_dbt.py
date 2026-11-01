@@ -437,6 +437,12 @@ async def test_the_player_marts_hold_the_covered_seasons_only(
         line for line in build.stdout.splitlines() if " WARN " in line
     )
 
+    # The Transform Run passes `COVERED_SEASON` to dbt.
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2024)
+    await ActivityEnvironment().run(dbt.build_dbt, ["--select", "appearances"])
+    cursor = await connection.execute("SELECT season, count(*) FROM marts.appearances GROUP BY 1")
+    assert await cursor.fetchall() == [(2024, 1)]
+
 
 async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     connection: AsyncConnection[Any], database_url: str, tmp_path: Path
@@ -446,7 +452,7 @@ async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     bridges = [b for b in REEP_TEAM_BRIDGES if b[1:] != ("understat", str(CHELSEA))]
 
     result = await _create_clubs(connection, database_url, tmp_path, bridges)
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
     build = await ActivityEnvironment().run(dbt.build_dbt, THE_REST)
 
@@ -686,7 +692,7 @@ async def test_identity_lists_only_the_unlinked_records_that_played_in_the_cover
     )
     await _create_clubs(connection, database_url, tmp_path)
     await ActivityEnvironment().run(
-        DbtActivities(database_url, DBT_PROJECT).build_dbt, CLUBS_AND_MATCHES
+        DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt, CLUBS_AND_MATCHES
     )
 
     async def unlinked(covered_season: int) -> list[tuple[str, int, int]]:
@@ -729,7 +735,7 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
         task_queue=task_queue,
         workflows=[TransformWorkflow],
         activities=[
-            DbtActivities(database_url, DBT_PROJECT).build_dbt,
+            DbtActivities(database_url, DBT_PROJECT, covered_season=2025).build_dbt,
             identity.create_clubs,
             identity.resolve_identities,
         ],
@@ -754,9 +760,10 @@ async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
 async def test_a_failed_dbt_test_fails_the_build_without_retries(
     connection: AsyncConnection[Any], database_url: str
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await _store_matches(connection)
     await ActivityEnvironment().run(dbt.build_dbt, STAGING)
+    await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
     cursor = await connection.execute(
         "INSERT INTO identity.players DEFAULT VALUES RETURNING player_id"
     )
@@ -781,7 +788,7 @@ async def test_a_failed_dbt_test_fails_the_build_without_retries(
 async def test_a_build_that_lost_its_database_connection_is_retried(
     connection: AsyncConnection[Any], database_url: str
 ) -> None:
-    dbt = DbtActivities(database_url, DBT_PROJECT)
+    dbt = DbtActivities(database_url, DBT_PROJECT, covered_season=2025)
     await _store_matches(connection)
     # Reading the Raw Responses ends the reader's own connection, as a Postgres restart would.
     await connection.execute("ALTER TABLE raw.raw_responses RENAME TO raw_responses_kept")

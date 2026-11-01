@@ -38,9 +38,13 @@ class DbtBuildResult:
 
 
 class DbtActivities:
-    """Runs `dbt build` on the project in `project_dir` against `database_url`'s database."""
+    """Runs `dbt build` on the project in `project_dir` against `database_url`'s database.
+    `covered_season` (ADR 35), by its start year, is the dbt var `covered_seasons`: the
+    Season the Player marts hold."""
 
-    def __init__(self, database_url: str, project_dir: Path = Path("dbt")) -> None:
+    def __init__(
+        self, database_url: str, project_dir: Path = Path("dbt"), *, covered_season: int
+    ) -> None:
         conninfo = conninfo_to_dict(database_url)
         self._env = {
             "POSTGRES_HOST": str(conninfo["host"]),
@@ -50,6 +54,7 @@ class DbtActivities:
             "POSTGRES_PASSWORD": str(conninfo.get("password", "")),
         }
         self._project_dir = project_dir.resolve()
+        self._vars = json.dumps({"covered_seasons": [covered_season]})
 
     @activity.defn
     async def build_dbt(self, selection: list[str]) -> DbtBuildResult:
@@ -62,6 +67,8 @@ class DbtActivities:
             str(self._project_dir),
             "--profiles-dir",
             str(self._project_dir),
+            "--vars",
+            self._vars,
         ]
         # The worker cannot write into the project in its image: target and logs go elsewhere.
         with tempfile.TemporaryDirectory(prefix="dbt-") as scratch:

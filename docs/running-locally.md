@@ -103,7 +103,7 @@ Clubs, Competitions and Stages have our own IDs, kept in `identity` ([ADR 34](ad
 
 `marts.clubs` has each Club with its Sofascore, Understat, Transfermarkt and Reep IDs. `marts.matches` links each source's Match to one canonical Match by Competition, season, home Club and away Club, then takes the Stage from the Sofascore round's Stage link, else the default: `premier-league:2025:league:arsenal:west-ham-united`. A Match whose Competition or a team has no link is left out, and a warning lists it; it never fails the build. Tests check that linked Matches agree on the score and that no fixture is two Matches with home and away swapped. A warning lists Matches only one source has stored yet.
 
-The Player marts are keyed to the canonical Player and Match, and hold the covered Seasons only: the dbt var `covered_seasons`, `[2025]` by default ([ADR 35](adr/0035-poc-covers-last-season.md)). Override it for one build with `--vars '{covered_seasons: [2024, 2025]}'`.
+The Player marts are keyed to the canonical Player and Match, and hold the covered Season only ([ADR 35](adr/0035-poc-covers-last-season.md)). The Transform Run passes `COVERED_SEASON` to dbt as the var `covered_seasons`. When you run dbt by hand, the var defaults to `[2025]`; override it with `--vars '{covered_seasons: [2024]}'`.
 
 - `marts.players` has each Player linked to a Source Record, with Transfermarkt's attributes where linked (birth date, nationality, position, current market value), else Sofascore's, and `understat_position`, the detailed position (DL, AMC…) of the Understat Appearances they started.
 - `marts.appearances` has one row per Player and Match, with minutes and Sofascore's per-match statistics (0 where Sofascore leaves a zero out) next to Understat's xG and xA.

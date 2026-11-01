@@ -58,7 +58,7 @@ async def run_worker(settings: Settings) -> None:
     identity = IdentityActivities(
         settings.database_url, settings.reep.release, covered_season=settings.covered_season
     )
-    dbt = DbtActivities(settings.database_url)
+    dbt = DbtActivities(settings.database_url, covered_season=settings.covered_season)
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
