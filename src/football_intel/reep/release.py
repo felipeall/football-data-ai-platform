@@ -7,7 +7,7 @@ checksums again, the release's quality gates and a diff from its predecessor.
 
 We load the Parquet bridges and redirects into Postgres. The release's DuckDB copy of the
 whole register is downloaded beside them for the football-docs MCP server's `resolve_entity`
-tool, which reads it through `REEP_DUCKDB_PATH`.
+tool, which reads it through `REEP_DUCKDB_PATH` in `.mcp.json`.
 """
 
 import hashlib
@@ -170,7 +170,8 @@ async def _manifest(
 def link_duckdb(root: Path, release: str) -> Path:
     """Point `root/reep-register.duckdb` at `release`'s copy, and return the link.
 
-    The link gives `REEP_DUCKDB_PATH` one path that follows the pinned release. It is
+    The link gives `REEP_DUCKDB_PATH` in `.mcp.json` one path that follows the pinned
+    release. It is
     relative, so it survives moving `root`, and is swapped in by a rename, so a reader never
     finds it missing.
     """

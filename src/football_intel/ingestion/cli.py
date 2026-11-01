@@ -322,8 +322,8 @@ async def load_reep(settings: Settings) -> None:
         f"release gate passed: {manifest.gate_passed}"
     )
     print(
-        f"Reep register for football-docs: {duckdb_link.resolve()}; point REEP_DUCKDB_PATH "
-        f"at {duckdb_link.absolute()}"
+        f"Reep register for football-docs ({duckdb_link}, set in .mcp.json): "
+        f"{duckdb_link.resolve()}"
     )
 
 
