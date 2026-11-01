@@ -1,9 +1,9 @@
 name: football-data-ai-platform
 
 # Langfuse v4 (ADR 18): web, worker, and its own Postgres, ClickHouse, Redis
-# and MinIO. Secrets come from .env; see .env.example. Nothing traces to it until the
-# agent lands, so it runs only with the `langfuse` profile:
-# `docker compose --profile langfuse up --wait`.
+# and MinIO. Secrets come from .env; see .env.example. Only the LLM judge traces to it so
+# far, so it runs only with the `langfuse` profile:
+# `docker compose --profile langfuse up --wait`. Without it, the judge still runs untraced.
 x-langfuse-env: &langfuse-env
   NEXTAUTH_URL: http://localhost:${LANGFUSE_PORT}
   DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD}@langfuse-postgres:5432/langfuse
@@ -110,7 +110,10 @@ services:
     env_file:
       - path: .env
         required: false
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # .env's localhost:3000 is the worker container itself; Langfuse is on the network.
+      LANGFUSE_BASE_URL: http://langfuse-web:3000
     depends_on:
       migrate:
         condition: service_completed_successfully

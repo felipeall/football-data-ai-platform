@@ -6,8 +6,11 @@ import logging
 from temporalio.client import Client
 from temporalio.worker import Worker
 
+from football_data_ai_platform.agent.roles import IDENTITY_JUDGE, llm_client
 from football_data_ai_platform.config import Settings
 from football_data_ai_platform.identity.activities import IdentityActivities
+from football_data_ai_platform.identity.review import IdentityReviewActivities
+from football_data_ai_platform.identity.workflows import IdentityReviewWorkflow
 from football_data_ai_platform.ingestion.activities import (
     SofascoreActivities,
     TransfermarktActivities,
@@ -58,6 +61,9 @@ async def run_worker(settings: Settings) -> None:
     identity = IdentityActivities(
         settings.database_url, settings.reep.release, covered_season=settings.covered_season
     )
+    review = IdentityReviewActivities(
+        settings.database_url, lambda: llm_client(IDENTITY_JUDGE, settings)
+    )
     dbt = DbtActivities(settings.database_url, covered_season=settings.covered_season)
     worker = Worker(
         client,
@@ -72,6 +78,7 @@ async def run_worker(settings: Settings) -> None:
             FixturesWorkflow,
             UnderstatIngestWorkflow,
             TransformWorkflow,
+            IdentityReviewWorkflow,
         ],
         activities=[
             activities.ingest_club_squad,
@@ -85,6 +92,10 @@ async def run_worker(settings: Settings) -> None:
             understat_activities.ingest_season,
             identity.resolve_identities,
             identity.create_clubs,
+            review.judgeable_candidates,
+            review.judge_candidate,
+            review.apply_review,
+            review.awaiting_review,
             dbt.build_dbt,
         ],
     )
