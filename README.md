@@ -1,4 +1,4 @@
-# football-intel
+# football-data-ai-platform
 
 > Durable football data ingestion with Temporal, and an AI scouting agent on top.
 
@@ -59,7 +59,7 @@ ADR numbers refer to [`docs/adr/`](docs/adr/).
 
 ## Roadmap
 
-Seven milestones in order, no deadlines ([ADR 27](docs/adr/0027-milestones-without-timing.md)). Work items live in [GitHub milestones](https://github.com/felipeall/football-intel/milestones).
+Seven milestones in order, no deadlines ([ADR 27](docs/adr/0027-milestones-without-timing.md)). Work items live in [GitHub milestones](https://github.com/felipeall/football-data-ai-platform/milestones).
 
 | Milestone | Phase | Delivery | Status |
 |---|---|---|---|
@@ -217,7 +217,7 @@ This project collects data from third-party websites for personal, non-commercia
 
 ## Prior work
 
-This project supersedes [`football-data-platform`](https://github.com/felipeall/football-data-platform) (v1).
+This project supersedes [`football-data-platform`](https://github.com/felipeall/football-data-platform) (v1, archived).
 
 ## License
 

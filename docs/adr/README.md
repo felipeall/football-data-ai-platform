@@ -1,7 +1,7 @@
 # Architecture Decision Records
 
 - [1. Scope and audience](0001-scope-and-audience.md)
-- [2. New repository; v1 archived; transfermarkt-api consumed over HTTP](0002-new-repo.md)
+- [2. New repository; v1 archived; transfermarkt-api consumed over HTTP](0002-new-repo.md) — repository name superseded by ADR 36
 - [3. Live-only data sources: Transfermarkt, Sofascore, Understat](0003-live-data-sources.md)
 - [4. Scraping posture: resilient, polite, no redistribution](0004-scraping-posture.md)
 - [5. Coverage and refresh cadence](0005-coverage-and-refresh.md)
@@ -35,3 +35,4 @@
 - [33. The Reep register maps Clubs; the club seed goes](0033-reep-maps-clubs.md) — superseded
 - [34. Canonical IDs are ours, created from Reep, then Transfermarkt](0034-canonical-ids-are-ours.md)
 - [35. The PoC covers last season only; Transfermarkt squads for that season](0035-poc-covers-last-season.md)
+- [36. Repository renamed to football-data-ai-platform; internal names stay](0036-repository-renamed.md)

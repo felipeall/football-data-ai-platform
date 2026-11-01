@@ -1,6 +1,6 @@
 # 2. New repository; v1 archived; transfermarkt-api consumed over HTTP
 
-Status: Accepted — 2026-10-11
+Status: Accepted — 2026-10-11. Repository name superseded by ADR 36.
 
 ## Context
 `football-data-platform` (v1) is Scrapy-based, Python 3.9, unfinished since 2024.

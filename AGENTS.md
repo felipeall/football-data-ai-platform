@@ -75,7 +75,7 @@ Work is tracked in GitHub Issues, one GitHub milestone per roadmap milestone (M1
 
 ### Issue tracker
 
-GitHub Issues on `felipeall/football-intel`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+GitHub Issues on `felipeall/football-data-ai-platform`, via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
