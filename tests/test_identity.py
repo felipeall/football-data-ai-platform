@@ -1,9 +1,14 @@
 from datetime import date
 from typing import Any
 
+import psycopg
 import pytest
-from psycopg import AsyncConnection
+from alembic import command
+from alembic.config import Config
+from psycopg import AsyncConnection, sql
 
+from football_intel.config import Settings
+from football_intel.identity.activities import Resolution, SourceRecords, resolve
 from football_intel.identity.names import normalize, similarity
 from football_intel.identity.rules import (
     ACCEPT_FROM,
@@ -11,13 +16,15 @@ from football_intel.identity.rules import (
     Appearance,
     Method,
     Proposal,
+    ReepBridge,
     SourcePlayer,
-    transfermarkt_proposals,
+    sofascore_proposals,
     understat_proposals,
 )
 from football_intel.identity.store import IdentityStore
 
 BORN = date(1999, 5, 1)
+RELEASE = "2026-01-02.1"
 
 
 def test_names_compare_without_accents_punctuation_or_word_order() -> None:
@@ -28,12 +35,16 @@ def test_names_compare_without_accents_punctuation_or_word_order() -> None:
     assert similarity("Andrew Robertson", "Andy Robertson") < 0.9
 
 
-def test_transfermarkt_links_on_birth_date_and_the_same_name() -> None:
-    sofascore = [SourcePlayer(1, "Djordje Petrović", BORN), SourcePlayer(2, "Someone Else", BORN)]
+def test_sofascore_links_on_birth_date_and_the_same_name() -> None:
+    transfermarkt = {
+        1: SourcePlayer(10, "Đorđe Petrović", BORN),
+        2: SourcePlayer(11, "Someone Else", BORN),
+    }
 
-    (proposal,) = transfermarkt_proposals([SourcePlayer(10, "Đorđe Petrović", BORN)], sofascore)
+    (proposal,) = sofascore_proposals([SourcePlayer(5, "Djordje Petrović", BORN)], transfermarkt)
 
-    assert (proposal.sofascore_player_id, proposal.method, proposal.confidence) == (
+    assert (proposal.source, proposal.player, proposal.method, proposal.confidence) == (
+        "sofascore",
         1,
         Method.NAME_BIRTH_DATE,
         1.0,
@@ -41,31 +52,35 @@ def test_transfermarkt_links_on_birth_date_and_the_same_name() -> None:
     assert proposal.accepted
 
 
-def test_transfermarkt_leaves_a_nickname_to_the_judge() -> None:
-    (proposal,) = transfermarkt_proposals(
-        [SourcePlayer(10, "Andrew Robertson", BORN)], [SourcePlayer(1, "Andy Robertson", BORN)]
+def test_sofascore_leaves_a_nickname_to_the_judge() -> None:
+    (proposal,) = sofascore_proposals(
+        [SourcePlayer(5, "Andy Robertson", BORN)], {1: SourcePlayer(10, "Andrew Robertson", BORN)}
     )
 
     assert proposal.method == Method.FUZZY
     assert JUDGE_FROM <= proposal.confidence < ACCEPT_FROM
 
 
-def test_transfermarkt_does_not_link_on_birth_date_alone() -> None:
+def test_sofascore_does_not_link_on_birth_date_alone() -> None:
     assert (
-        transfermarkt_proposals(
-            [SourcePlayer(10, "Tom McGill", BORN)], [SourcePlayer(1, "Jadon Sancho", BORN)]
+        sofascore_proposals(
+            [SourcePlayer(5, "Jadon Sancho", BORN)], {1: SourcePlayer(10, "Tom McGill", BORN)}
         )
         == []
     )
-    assert transfermarkt_proposals([SourcePlayer(10, "Tom McGill", None)], []) == []
+    assert sofascore_proposals([SourcePlayer(5, "Tom McGill", None)], {}) == []
 
 
-def test_transfermarkt_leaves_two_same_named_players_to_the_judge() -> None:
-    sofascore = [SourcePlayer(1, "Joe Smith", BORN), SourcePlayer(2, "Joe Smith", BORN)]
+def test_sofascore_leaves_two_same_named_players_to_the_judge() -> None:
+    transfermarkt = {1: SourcePlayer(10, "Joe Smith", BORN), 2: SourcePlayer(11, "Joe Smith", BORN)}
 
-    (proposal,) = transfermarkt_proposals([SourcePlayer(10, "Joe Smith", BORN)], sofascore)
+    (proposal,) = sofascore_proposals([SourcePlayer(5, "Joe Smith", BORN)], transfermarkt)
 
     assert not proposal.accepted
+
+
+# Sofascore players 1 and 2 link to Players 501 and 502.
+LINKED = {1: 501, 2: 502}
 
 
 def _season(player_id: int, minutes: list[int], club: str = "arsenal") -> list[Appearance]:
@@ -77,11 +92,15 @@ def test_understat_links_the_same_named_teammate_who_played_the_same_minutes() -
     sofascore = _season(1, [90, 90, 81, 90]) + _season(2, [90, 90, 90, 90])
 
     (proposal,) = understat_proposals(
-        understat, sofascore, {100: "Ezri Konsa Ngoyo"}, {1: "Ezri Konsa", 2: "Ollie Watkins"}
+        understat,
+        sofascore,
+        {100: "Ezri Konsa Ngoyo"},
+        {1: "Ezri Konsa", 2: "Ollie Watkins"},
+        LINKED,
     )
 
-    assert (proposal.sofascore_player_id, proposal.method, proposal.confidence) == (
-        1,
+    assert (proposal.player, proposal.method, proposal.confidence) == (
+        501,
         Method.CO_APPEARANCE,
         1.0,
     )
@@ -94,10 +113,14 @@ def test_understat_does_not_link_a_contained_name_whose_minutes_disagree() -> No
     sofascore = _season(1, [60, 45, 70, 30]) + _season(2, [90, 90, 90, 90])
 
     (proposal,) = understat_proposals(
-        understat, sofascore, {100: "Gabriel"}, {1: "Gabriel Martinelli", 2: "Gabriel Magalhães"}
+        understat,
+        sofascore,
+        {100: "Gabriel"},
+        {1: "Gabriel Martinelli", 2: "Gabriel Magalhães"},
+        LINKED,
     )
 
-    assert proposal.sofascore_player_id == 2
+    assert proposal.player == 502
     assert proposal.method == Method.FUZZY
 
 
@@ -108,7 +131,7 @@ def test_understat_does_not_link_a_lone_contained_name_whose_minutes_disagree() 
     sofascore = _season(1, [60, 45, 70, 30])
 
     (proposal,) = understat_proposals(
-        understat, sofascore, {100: "Gabriel"}, {1: "Gabriel Martinelli"}
+        understat, sofascore, {100: "Gabriel"}, {1: "Gabriel Martinelli"}, LINKED
     )
 
     assert proposal.method == Method.FUZZY
@@ -120,11 +143,25 @@ def test_understat_scores_a_nickname_on_name_co_appearance_and_minutes() -> None
     sofascore = _season(1, [90] * 10) + _season(2, [90] * 10)
 
     (proposal,) = understat_proposals(
-        understat, sofascore, {100: "Matthew Cash"}, {1: "Matty Cash", 2: "Ollie Watkins"}
+        understat, sofascore, {100: "Matthew Cash"}, {1: "Matty Cash", 2: "Ollie Watkins"}, LINKED
     )
 
-    assert (proposal.sofascore_player_id, proposal.method) == (1, Method.FUZZY)
+    assert (proposal.player, proposal.method) == (501, Method.FUZZY)
     assert proposal.accepted
+
+
+def test_understat_leaves_a_player_whose_sofascore_record_has_no_player_unlinked() -> None:
+    # An academy debutant: his own Sofascore record (3) is unlinked, and a teammate who came
+    # on in his only Match must not be proposed in his place.
+    understat = _season(100, [20])
+    sofascore = _season(1, [90]) + _season(3, [20])
+
+    assert (
+        understat_proposals(
+            understat, sofascore, {100: "Shea Lacey"}, {1: "Luke Shaw", 3: "Shea Lacey"}, LINKED
+        )
+        == []
+    )
 
 
 def test_understat_ignores_players_of_another_club_and_rare_teammates() -> None:
@@ -134,7 +171,7 @@ def test_understat_ignores_players_of_another_club_and_rare_teammates() -> None:
 
     assert (
         understat_proposals(
-            understat, sofascore, {100: "Joe Smith"}, {1: "Joe Smith", 2: "Joe Smith"}
+            understat, sofascore, {100: "Joe Smith"}, {1: "Joe Smith", 2: "Joe Smith"}, LINKED
         )
         == []
     )
@@ -156,60 +193,283 @@ async def _candidates(connection: AsyncConnection[Any]) -> list[tuple[Any, ...]]
     return await cursor.fetchall()
 
 
-async def test_a_rerun_keeps_player_ids_and_adds_no_candidates(
+async def _players(connection: AsyncConnection[Any]) -> int:
+    cursor = await connection.execute("SELECT count(*) FROM identity.players")
+    row = await cursor.fetchone()
+    assert row is not None
+    return row[0]
+
+
+def _records(
+    sofascore: list[SourcePlayer] | None = None,
+    transfermarkt: list[SourcePlayer] | None = None,
+    understat: list[SourcePlayer] | None = None,
+    sofascore_appearances: list[Appearance] | None = None,
+    understat_appearances: list[Appearance] | None = None,
+) -> SourceRecords:
+    return SourceRecords(
+        sofascore or [],
+        transfermarkt or [],
+        understat or [],
+        sofascore_appearances or [],
+        understat_appearances or [],
+    )
+
+
+def _unlinked(resolution: Resolution) -> list[tuple[str, int, bool]]:
+    return [(s, p.source_record_id, pending) for s, p, pending in resolution.unlinked]
+
+
+# Person A: Sofascore 1, Transfermarkt 10, Understat 100. Transfermarkt 11 has no Reep person.
+# Sofascore 2 and Understat 101 match no Player.
+REEP = [
+    ReepBridge("rA", "sofascore", 1),
+    ReepBridge("rA", "transfermarkt", 10),
+    ReepBridge("rA", "understat", 100),
+]
+WORLD = _records(
+    sofascore=[
+        SourcePlayer(1, "Ezri Konsa", BORN),
+        SourcePlayer(2, "Lone Debutant", date(2007, 1, 1)),
+    ],
+    transfermarkt=[
+        SourcePlayer(10, "Ezri Konsa", BORN),
+        SourcePlayer(11, "Tom McGill", date(2000, 3, 25)),
+    ],
+    understat=[SourcePlayer(100, "Ezri Konsa"), SourcePlayer(101, "Lone Debutant")],
+    sofascore_appearances=_season(1, [90, 90]) + _season(2, [10, 10]),
+    understat_appearances=_season(100, [90, 90]) + _season(101, [10, 10], club="chelsea"),
+)
+
+
+async def test_reep_creates_the_player_before_transfermarkt_and_match_sources_create_none(
     identity: IdentityStore, connection: AsyncConnection[Any]
 ) -> None:
-    proposals = [Proposal(10, 1, Method.NAME_BIRTH_DATE, 1.0), Proposal(11, 2, Method.FUZZY, 0.7)]
-    players, created = await identity.anchor_sofascore([1, 2])
-    await identity.propose("transfermarkt", proposals, players)
+    resolution = await resolve(identity, WORLD, RELEASE, REEP)
+
+    assert resolution.players_created == await _players(connection) == 2
+    assert await _candidates(connection) == [
+        ("sofascore", "1", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "10", 1, "reep_bridge", "accepted"),
+        ("understat", "100", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "11", 2, "transfermarkt_player", "accepted"),
+    ]
+    assert _unlinked(resolution) == [("sofascore", 2, False), ("understat", 101, False)]
+
+
+async def test_without_a_reep_release_transfermarkt_creates_every_player(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    resolution = await resolve(identity, WORLD, None, None)
+
+    # Sofascore 1 links to Transfermarkt 10's Player by name and birth date, and Understat
+    # 100 by co-appearance with Sofascore 1.
+    assert resolution.players_created == 2
+    assert await _candidates(connection) == [
+        ("transfermarkt", "10", 1, "transfermarkt_player", "accepted"),
+        ("transfermarkt", "11", 2, "transfermarkt_player", "accepted"),
+        ("sofascore", "1", 1, "name_birth_date", "accepted"),
+        ("understat", "100", 1, "co_appearance", "accepted"),
+    ]
+
+
+async def test_a_sofascore_player_without_a_reep_person_links_by_name_and_birth_date(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    records = _records(
+        sofascore=[*WORLD.sofascore, SourcePlayer(3, "Tom McGill", date(2000, 3, 25))],
+        transfermarkt=WORLD.transfermarkt,
+    )
+
+    await resolve(identity, records, RELEASE, REEP)
+
+    assert ("sofascore", "3", 2, "name_birth_date", "accepted") in await _candidates(connection)
+
+
+async def test_an_understat_player_links_by_co_appearance_with_a_player_s_sofascore_appearances(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    # Reep maps only Sofascore 1; Understat 100 links to its Player by co-appearance.
+    await resolve(identity, WORLD, RELEASE, REEP[:1])
+
+    assert ("understat", "100", 1, "co_appearance", "accepted") in await _candidates(connection)
+
+
+async def test_a_reep_bridge_links_a_new_record_to_the_player_of_a_linked_one(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    await resolve(identity, _records(sofascore=WORLD.sofascore[:1]), RELEASE, REEP)
+
+    # A later run holds Transfermarkt 10, which person A's Player already has a link from.
+    resolution = await resolve(
+        identity,
+        _records(sofascore=WORLD.sofascore[:1], transfermarkt=WORLD.transfermarkt[:1]),
+        RELEASE,
+        REEP,
+    )
+
+    assert resolution.players_created == 0
+    assert await _candidates(connection) == [
+        ("sofascore", "1", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "10", 1, "reep_bridge", "accepted"),
+    ]
+
+
+async def test_a_rerun_creates_no_players_and_changes_no_ids(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    await resolve(identity, WORLD, RELEASE, REEP)
     first = await _candidates(connection)
 
-    players_again, created_again = await identity.anchor_sofascore([1, 2, 3])
-    stored_again = await identity.propose("transfermarkt", proposals, players_again)
+    again = await resolve(identity, WORLD, RELEASE, REEP)
 
-    assert (created, created_again, stored_again) == (2, 1, 0)
-    assert {k: players_again[k] for k in players} == players
+    assert (again.players_created, again.candidates_stored) == (0, 0)
+    assert await _candidates(connection) == first
+
+
+async def test_reep_disagreeing_with_understat_co_appearance_waits_for_the_judge(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    # Wolves' André: Reep maps Sofascore 1 to Understat 802, who never played with him; our
+    # data says Understat 13022.
+    records = _records(
+        sofascore=[SourcePlayer(1, "André", BORN)],
+        understat=[SourcePlayer(802, "André"), SourcePlayer(13022, "André")],
+        sofascore_appearances=_season(1, [90, 90], club="wolves"),
+        understat_appearances=[
+            *_season(13022, [90, 90], club="wolves"),
+            Appearance("m9", "fulham", 802, 90),
+        ],
+    )
+    bridges = [ReepBridge("rA", "sofascore", 1), ReepBridge("rA", "understat", 802)]
+
+    await resolve(identity, records, RELEASE, bridges)
+
     assert await _candidates(connection) == [
-        *first,
-        ("sofascore", "3", 3, "sofascore_anchor", "accepted"),
+        ("sofascore", "1", 1, "reep_bridge", "accepted"),
+        ("understat", "802", 1, "reep_bridge", "pending"),
+        ("understat", "13022", 1, "co_appearance", "accepted"),
     ]
-    assert first == [
-        ("sofascore", "1", 1, "sofascore_anchor", "accepted"),
-        ("sofascore", "2", 2, "sofascore_anchor", "accepted"),
-        ("transfermarkt", "10", 1, "name_birth_date", "accepted"),
-        ("transfermarkt", "11", 2, "fuzzy", "pending"),
+    cursor = await connection.execute(
+        "SELECT evidence->>'disagreement' FROM identity.identity_candidates"
+        " WHERE source_record_id = '802'"
+    )
+    assert await cursor.fetchone() == (
+        "never played in the same Match for the same Club as Sofascore player 1",
+    )
+
+
+async def test_reep_disagreeing_with_a_transfermarkt_birth_date_waits_for_the_judge(
+    identity: IdentityStore, connection: AsyncConnection[Any]
+) -> None:
+    records = _records(
+        sofascore=[SourcePlayer(1, "Ezri Konsa", BORN)],
+        transfermarkt=[
+            SourcePlayer(10, "Ezri Konsa", date(1999, 5, 2)),  # a day off: the same man
+            SourcePlayer(11, "Ezri Konsa", date(1997, 5, 1)),
+        ],
+    )
+    # Reep bridges both to person A; 11's birth date is two years off.
+    bridges = [
+        ReepBridge("rA", "sofascore", 1),
+        ReepBridge("rA", "transfermarkt", 10),
+        ReepBridge("rA", "transfermarkt", 11),
+    ]
+
+    await resolve(identity, records, RELEASE, bridges)
+
+    assert await _candidates(connection) == [
+        ("sofascore", "1", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "10", 1, "reep_bridge", "accepted"),
+        ("transfermarkt", "11", 1, "reep_bridge", "pending"),
     ]
 
 
 async def test_a_rejected_candidate_is_not_proposed_again(
     identity: IdentityStore, connection: AsyncConnection[Any]
 ) -> None:
-    players, _ = await identity.anchor_sofascore([1])
-    await identity.propose("understat", [Proposal(100, 1, Method.FUZZY, 0.7)], players)
+    await identity.propose([Proposal("understat", 100, "new", Method.FUZZY, 0.7)])
     await connection.execute(
         "UPDATE identity.identity_candidates SET status = 'rejected' WHERE source = 'understat'"
     )
 
-    stored = await identity.propose(
-        "understat", [Proposal(100, 1, Method.CO_APPEARANCE, 1.0)], players
+    stored, created = await identity.propose(
+        [Proposal("understat", 100, 1, Method.CO_APPEARANCE, 1.0)]
     )
 
-    assert stored == 0
+    assert (stored, created) == (0, 0)
     assert (await _candidates(connection))[-1] == ("understat", "100", 1, "fuzzy", "rejected")
 
 
 async def test_a_second_link_to_a_player_from_one_source_waits_for_the_judge(
     identity: IdentityStore, connection: AsyncConnection[Any]
 ) -> None:
-    players, _ = await identity.anchor_sofascore([1])
-
     await identity.propose(
-        "transfermarkt",
         [
-            Proposal(10, 1, Method.NAME_BIRTH_DATE, 1.0),
-            Proposal(11, 1, Method.NAME_BIRTH_DATE, 1.0),
-        ],
-        players,
+            Proposal("sofascore", 1, "new", Method.NAME_BIRTH_DATE, 1.0),
+            Proposal("sofascore", 2, "new", Method.NAME_BIRTH_DATE, 1.0),
+        ]
     )
 
-    assert [row[4] for row in await _candidates(connection)] == ["accepted", "accepted", "pending"]
+    assert [row[2:] for row in await _candidates(connection)] == [
+        (1, "name_birth_date", "accepted"),
+        (1, "name_birth_date", "pending"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("status", "decided_by"),
+    [("accepted", "judge:claude-haiku"), ("accepted", None), ("rejected", "rule:fuzzy")],
+)
+def test_recreating_players_stops_when_a_judge_or_reviewer_decided(
+    status: str, decided_by: str | None
+) -> None:
+    settings = Settings()
+    database = f"{settings.postgres_db}_recreation"
+    url = settings.model_copy(update={"postgres_db": database}).database_url
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", url)
+    config.attributes["configure_logger"] = False
+    try:
+        admin = psycopg.connect(settings.database_url, autocommit=True, connect_timeout=3)
+    except psycopg.OperationalError as error:
+        pytest.skip(f"Postgres unreachable ({error})")
+    with admin:
+        name = sql.Identifier(database)
+        admin.execute(sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(name))
+        admin.execute(sql.SQL("CREATE DATABASE {}").format(name))
+    try:
+        command.upgrade(config, "0007")
+        with psycopg.connect(url, autocommit=True) as conn:
+            conn.execute("INSERT INTO identity.players DEFAULT VALUES")
+            conn.execute(
+                "INSERT INTO identity.identity_candidates"
+                " (source, source_record_id, player_id, method, confidence, status, decided_by)"
+                " VALUES ('sofascore', '1', 1, 'sofascore_anchor', 1, 'accepted', 'rule:x'),"
+                " ('understat', '100', 1, 'fuzzy', 0.7, %s, %s)",
+                (status, decided_by),
+            )
+
+            with pytest.raises(Exception, match="decided by the LLM judge or a reviewer"):
+                command.upgrade(config, "head")
+
+            cursor = conn.execute("SELECT count(*) FROM identity.identity_candidates")
+            assert cursor.fetchone() == (2,)
+            # With only rule decisions, it clears both tables and keeps counting Player IDs.
+            conn.execute(
+                "UPDATE identity.identity_candidates SET status = 'pending', decided_by = NULL"
+                " WHERE source = 'understat'"
+            )
+            command.upgrade(config, "head")
+            cursor = conn.execute(
+                "SELECT (SELECT count(*) FROM identity.identity_candidates),"
+                " (SELECT count(*) FROM identity.players)"
+            )
+            assert cursor.fetchone() == (0, 0)
+            cursor = conn.execute("INSERT INTO identity.players DEFAULT VALUES RETURNING player_id")
+            assert cursor.fetchone() == (2,)
+    finally:
+        with psycopg.connect(settings.database_url, autocommit=True) as admin:
+            admin.execute(
+                sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(sql.Identifier(database))
+            )

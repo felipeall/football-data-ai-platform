@@ -1,6 +1,6 @@
 # 32. The Reep register is the first mapping layer of Identity Resolution
 
-Status: Accepted — 2026-10-25. Refines ADR 6 (identity resolution). Extended to Clubs by ADR 33. Amended by ADR 34 (Reep and Transfermarkt create Players; the load keeps entities bridged to two ingested providers).
+Status: Accepted — 2026-10-25. Refines ADR 6 (identity resolution). Extended to Clubs by ADR 33. Amended by ADR 34 (Reep and Transfermarkt create Players; the load keeps entities bridged to two ingested providers). The veto proposed below is implemented (#69).
 
 ## Context
 Identity Resolution (ADR 6, #47) links Transfermarkt and Understat players to the Sofascore players that anchor Players, with deterministic rules, fuzzy scoring, an LLM judge and human review. Its rules work on the data we have ingested.
@@ -67,7 +67,9 @@ It prints the pinned release, the releases loaded into the database, the current
 
 The new release only links Source Records that have no Candidate yet (see *Upgrades*). Older tags' rows can be deleted once no longer pinned. Candidates keep their `decided_by = reep:<tag>`, so their origin stays traceable.
 
-## Proposed, not implemented: our data can veto Reep
+## Our data can veto Reep
+*Proposed here; implemented by #69 (ADR 34). The check runs when a Reep link is proposed, against the Player's Sofascore record. A bridge a new release changes is not checked again, since a new release never changes an existing Candidate.*
+
 Before accepting a Reep bridge, check that our own data does not contradict it:
 
 - **Transfermarkt:** the two birth dates match within one day (sources disagree by a day, as for El Hadji Malick Diouf).
@@ -75,7 +77,7 @@ Before accepting a Reep bridge, check that our own data does not contradict it:
 
 A bridge that fails would become a pending Candidate, listed as a disagreement for the judge or a reviewer, instead of an accepted link. The same check would flag bridges that a new release changes.
 
-This would catch errors like the André bridge in cases where we hold both records. It is left out for simplicity, and can be added without changing this decision's order.
+This would catch errors like the André bridge in cases where we hold both records. It was left out at first for simplicity; it does not change this decision's order.
 
 ## Consequences
 - **Fewer cases for our own matching:** on today's data, Reep links about 855 Source Records, and our rules handle about 550 more where Reep has no mapping.

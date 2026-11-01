@@ -185,7 +185,19 @@ async def resolve_identities(settings: Settings) -> None:
         f"{result.candidates_stored} Candidates stored"
     )
     for count in result.candidates:
-        print(f"  {count.source:<13} {count.method:<17} {count.status:<9} {count.count:>5}")
+        print(f"  {count.source:<13} {count.method:<20} {count.status:<9} {count.count:>5}")
+    for source in ("sofascore", "understat"):
+        unlinked = [r for r in result.unlinked if r.source == source]
+        played = sum(1 for r in unlinked if r.minutes > 0)
+        print(
+            f"{len(unlinked)} {source} players link to no Player, {played} of them with minutes;"
+            " their Appearances stay out of the Player marts:"
+        )
+        for record in sorted(unlinked, key=lambda r: (-r.minutes, r.source_record_id)):
+            pending = ", a Candidate pending" if record.pending else ""
+            print(
+                f"  {record.source_record_id:>9} {record.name} ({record.minutes} minutes{pending})"
+            )
 
 
 async def create_clubs(settings: Settings) -> None:
