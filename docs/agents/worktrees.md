@@ -27,10 +27,9 @@ A live check runs on a copy of live, never on live itself:
 
 1. `scripts/worktree.sh refresh-db` replaces the worktree database with a copy of live (about 300 MB, 15 s).
 2. Migrate it from the worktree: `uv run alembic upgrade head`.
-3. Run dbt with the worktree's settings: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt …`.
-4. For CLI commands that start a workflow (`create-clubs`, `resolve-identities`, the ingest commands), start a worker from the worktree on its own queue, `uv run --env-file .env python -m football_data_ai_platform.ingestion.worker`, then run the command from the worktree. Without that worker the workflow waits on the worktree queue, untouched.
+3. For CLI commands that start a workflow (`transform`, the ingest commands), start a worker from the worktree on its own queue, `uv run --env-file .env python -m football_data_ai_platform.ingestion.worker`, then run the command from the worktree. Without that worker the workflow waits on the worktree queue, untouched.
 
-Workflow IDs are fixed (`create-clubs`, `identity-resolution`) and share the `default` namespace with live, so a start is refused while a live run with the same ID is open. Wait for it to close (Temporal UI, <http://localhost:8233>). ADR 31's `transform` (#70) will join an open run instead.
+Some workflow IDs are fixed and share the `default` namespace with live. `transform` is one: a worktree's `fdap transform` while a live Transform Run is open joins the live run, on live's queue and database, instead of starting its own. Check the Temporal UI (<http://localhost:8233>) for an open `transform` first, and wait for it to close. A worktree's own dbt work outside a run: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt …`.
 
 Report live numbers from the worktree database, and name it in the issue comment.
 

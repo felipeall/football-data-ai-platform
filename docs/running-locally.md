@@ -1,6 +1,6 @@
 # Running locally
 
-How to start the stack, run each ingestion, transform and identity step by hand, and run the development tools. For what the pipeline does and why, see the [README](../README.md); for the Temporal workflows behind these commands, see [`temporal.md`](temporal.md).
+How to start the stack, run each ingestion and the Transform Run, and run the development tools. For what the pipeline does and why, see the [README](../README.md); for the Temporal workflows behind these commands, see [`temporal.md`](temporal.md).
 
 ## Start the stack
 
@@ -78,36 +78,43 @@ uv run fdap success-rates --from 2026-10-01 --to 2026-10-13
 
 The success rate shows breakage: successful answers and 404s (the source answered; the thing does not exist) over the attempts that reached the source. Circuit-breaker rejections and reuses never reached it, so they are counted but left out of the rate. An answer counts as blocked when it is a 403 or 429, or when the source's own failure test rejects it, such as Transfermarkt's WAF challenge served with a 200. The same numbers are in the `raw.source_success_rates` view.
 
-Transforms run in dbt ([ADR 11](adr/0011-transform-layer.md)), from the project in `dbt/`. It reads `raw.raw_responses` and the `identity` schema, and builds views in the `staging` schema and tables in `marts`. The Clubs come between staging and the marts, so a fresh checkout runs, after `uv run alembic upgrade head` and `load-reep` (below):
+Transforms run in dbt ([ADR 11](adr/0011-transform-layer.md)), from the project in `dbt/`. It reads `raw.raw_responses` and the `identity` schema, and builds views in the `staging` schema and tables in `marts`. One Transform Run ([ADR 31](adr/0031-identity-schema-and-transform-runs.md), [ADR 34](adr/0034-canonical-ids-are-ours.md)) builds everything, after `uv run alembic upgrade head` and `load-reep` (below):
 
 ```sh
-uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt --select staging --exclude source:identity+
-uv run fdap create-clubs
-uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt
+uv run fdap transform
 ```
 
-dbt reads the connection from the `POSTGRES_*` variables, so `--env-file .env` passes them. Staging uses the latest successful Raw Response per URL, so re-fetches and failed answers drop out. `staging.stg_sofascore__matches` has the finished Sofascore Matches with their round, `staging.stg_sofascore__appearances` one row per player with minutes in a Match, and `marts.player_season_minutes` the Appearances and minutes per player and season. From Understat, `staging.stg_understat__matches` has the played Matches with their xG, `staging.stg_understat__appearances` one row per player with minutes, and `staging.stg_understat__shots` every Shot with its location and xG. From Transfermarkt, `staging.stg_transfermarkt__players` has the squads' players and `staging.stg_transfermarkt__clubs` every club the batched `/clubs` responses name, with its country.
+It starts the `TransformWorkflow`, whose fixed ID is `transform`, so a start while a run is going joins that run. The worker runs its four steps, each an activity:
+
+1. dbt builds staging: `--select staging --exclude source:identity+`;
+2. the Club step creates and links Clubs (below);
+3. dbt builds `clubs` and `matches`, those two models only;
+4. Identity Resolution creates Players and links Source Records to them (below), then dbt builds the rest: `--exclude staging clubs matches`.
+
+dbt runs as a subprocess of the worker, with `--indirect-selection cautious`, so a test runs in the step that builds the last of its parents. A failed model or test fails the run without retries. A team or player that links to nothing never fails it: the command prints each step's time, dbt's warnings, the Clubs created, the teams with no Club, and the players that link to no Player. No Schedule starts it while the stack is local; run it after ingesting.
+
+To run dbt by hand, for example one model while working on it: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt --select <model>`. dbt reads the connection from the `POSTGRES_*` variables, so `--env-file .env` passes them. Staging uses the latest successful Raw Response per URL, so re-fetches and failed answers drop out. `staging.stg_sofascore__matches` has the finished Sofascore Matches with their round, `staging.stg_sofascore__appearances` one row per player with minutes in a Match, and `marts.player_season_minutes` the Appearances and minutes per player and season. From Understat, `staging.stg_understat__matches` has the played Matches with their xG, `staging.stg_understat__appearances` one row per player with minutes, and `staging.stg_understat__shots` every Shot with its location and xG. From Transfermarkt, `staging.stg_transfermarkt__players` has the squads' players and `staging.stg_transfermarkt__clubs` every club the batched `/clubs` responses name, with its country.
 
 Clubs, Competitions and Stages have our own IDs, kept in `identity` ([ADR 34](adr/0034-canonical-ids-are-ours.md)):
 
 - **Competitions and Stages** are entered by hand, in a migration, when we take one on. The Premier League is `premier-league` (Sofascore 17, Understat `EPL`, Transfermarkt `GB1`), with one Stage, `league`. A Stage link can map a range of Sofascore round numbers to another Stage. Ranges never overlap, and apply to every season: a cup that renumbers its rounds by season would need a season on the link.
-- **`create-clubs`** gives a Club to every team in the stored Matches of those Competitions. The pinned Reep release's team bridges link the team, and the Reep team creates the Club the first time we see it. The Club ID is a slug of its Transfermarkt name: ASCII, `&` as `and`, apostrophes and dots dropped, the words `fc`, `afc` and `cf` dropped (`AFC Bournemouth` is `bournemouth`, `Brighton & Hove Albion` is `brighton-and-hove-albion`). A slug already taken gets the country appended (`-england`). A re-run creates nothing for teams already linked, and never moves a link. A team without a Reep team, or whose Reep team has no Transfermarkt name, gets no Club: the command lists it and why.
+- **The Club step** gives a Club to every team in the stored Matches of those Competitions. The pinned Reep release's team bridges link the team, and the Reep team creates the Club the first time we see it. The Club ID is a slug of its Transfermarkt name: ASCII, `&` as `and`, apostrophes and dots dropped, the words `fc`, `afc` and `cf` dropped (`AFC Bournemouth` is `bournemouth`, `Brighton & Hove Albion` is `brighton-and-hove-albion`). A slug already taken gets the country appended (`-england`). A re-run creates nothing for teams already linked, and never moves a link. A team without a Reep team, or whose Reep team has no Transfermarkt name, gets no Club: `transform` lists it and why.
 - **`rename-club <club> <new-slug>`** renames a Club. The former slug stays as an alias, and `marts.match_id_aliases` resolves the Match IDs built from it.
 
 `marts.clubs` has each Club with its Sofascore, Understat, Transfermarkt and Reep IDs. `marts.matches` links each source's Match to one canonical Match by Competition, season, home Club and away Club, then takes the Stage from the Sofascore round's Stage link, else the default: `premier-league:2025:league:arsenal:west-ham-united`. A Match whose Competition or a team has no link is left out, and a warning lists it; it never fails the build. Tests check that linked Matches agree on the score and that no fixture is two Matches with home and away swapped. A warning lists Matches only one source has stored yet.
 
-Identity Resolution creates Players and links the staged Source Records to them ([ADR 6](adr/0006-identity-resolution.md), [ADR 31](adr/0031-identity-schema-and-transform-runs.md), [ADR 32](adr/0032-reep-first-mapping-layer.md), [ADR 34](adr/0034-canonical-ids-are-ours.md)). The [Reep](https://reep.football) register, from a pinned release, and Transfermarkt create Players; Sofascore and Understat only link to them. Pin the release in `.env` (`REEP__RELEASE=2026-10-31.1`), load it once, then run Identity Resolution after `dbt build`:
+Identity Resolution creates Players and links the staged Source Records to them ([ADR 6](adr/0006-identity-resolution.md), [ADR 31](adr/0031-identity-schema-and-transform-runs.md), [ADR 32](adr/0032-reep-first-mapping-layer.md), [ADR 34](adr/0034-canonical-ids-are-ours.md)). The [Reep](https://reep.football) register, from a pinned release, and Transfermarkt create Players; Sofascore and Understat only link to them. Pin the release in `.env` (`REEP__RELEASE=2026-10-31.1`) and load it once. Identity Resolution then runs in each Transform Run:
 
 ```sh
 uv run fdap reep-status          # pinned, loaded and current releases, and what changed
 uv run fdap load-reep            # download, verify and load the pinned release
-uv run fdap resolve-identities
+uv run fdap transform
 ```
 
 - **Checking for a new release.** Reep publishes data releases on `data.reep.football`, often more than once a week. Nothing announces them, and the GitHub repository's tags are code versions, not data. `reep-status` reads `releases/latest.json`, then each newer release's manifest, found through its file list (`releases/<release>/release.json`). A manifest describes the changes from its predecessor: new bridges per provider, the change in players and teams, ID retention, and the release's own quality gate. It also counts the persons, teams and bridges of each loaded release, and prints them before it calls Reep, so they show even when Reep can't be read (the command then exits with an error). It downloads no bridges.
 - **Loading a release.** `load-reep` reads the pinned release's file list (`releases/<release>/release.json`). It fetches the manifest, `bridges.parquet` (about 395 MB, every entity type), `redirects.parquet` and `reep-register.duckdb` (about 1.2 GB, the whole register for the football-docs MCP server) from the keys listed there into `data/reep/<release>/`, and checks each file's SHA-256 against both the file list and the manifest. A mismatch stops it, and a file already verified is not downloaded again. It then keeps the person and team bridges of every entity Reep maps to at least two of Sofascore, Transfermarkt and Understat (about 29k persons and 9k teams; Transfermarkt teams by their `verein` ID), with merged Reep IDs resolved, and loads them into `reference.reep_player_bridges` and `reference.reep_team_bridges`, replacing that release's rows ([ADR 34](adr/0034-canonical-ids-are-ours.md)). The manifest and its gate result go to `reference.reep_releases`.
 - **Reep lookups for coding agents.** `load-reep` points `data/reep/reep-register.duckdb` at the pinned release's DuckDB register. `.mcp.json` sets `REEP_DUCKDB_PATH` to that link, relative to the checkout (a worktree's `data/` links to the main checkout's), so the football-docs MCP server's `resolve_entity` tool answers from it ([agent skills](agent-skills.md)).
-- **Upgrading.** Set `REEP__RELEASE` to the new stamp, then run `load-reep`, `create-clubs` and `resolve-identities`. A new release only links Source Records and teams that have no link yet, so links, Club IDs and Player IDs never change. `resolve-identities` stops if the pinned release is not loaded.
+- **Upgrading.** Set `REEP__RELEASE` to the new stamp, then run `load-reep` and `transform`. A new release only links Source Records and teams that have no link yet, so links, Club IDs and Player IDs never change. `transform` stops at the Club step if the pinned release is not loaded.
 
 How Players are created and Source Records linked, in order:
 

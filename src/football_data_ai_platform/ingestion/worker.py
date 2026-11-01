@@ -8,7 +8,6 @@ from temporalio.worker import Worker
 
 from football_data_ai_platform.config import Settings
 from football_data_ai_platform.identity.activities import IdentityActivities
-from football_data_ai_platform.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
 from football_data_ai_platform.ingestion.activities import (
     SofascoreActivities,
     TransfermarktActivities,
@@ -33,6 +32,8 @@ from football_data_ai_platform.sources.sofascore.captcha import (
     camoufox_solver,
 )
 from football_data_ai_platform.sources.transfermarkt import SOURCE, is_upstream_failure
+from football_data_ai_platform.transform.dbt import DbtActivities
+from football_data_ai_platform.transform.workflows import TransformWorkflow
 
 
 async def run_worker(settings: Settings) -> None:
@@ -55,6 +56,7 @@ async def run_worker(settings: Settings) -> None:
         settings.database_url, SourceInterface(understat.SOURCE, settings.understat)
     )
     identity = IdentityActivities(settings.database_url, settings.reep.release)
+    dbt = DbtActivities(settings.database_url)
     worker = Worker(
         client,
         task_queue=settings.temporal_task_queue,
@@ -67,8 +69,7 @@ async def run_worker(settings: Settings) -> None:
             PostMatchWorkflow,
             FixturesWorkflow,
             UnderstatIngestWorkflow,
-            IdentityResolutionWorkflow,
-            ClubWorkflow,
+            TransformWorkflow,
         ],
         activities=[
             activities.ingest_club_squad,
@@ -82,6 +83,7 @@ async def run_worker(settings: Settings) -> None:
             understat_activities.ingest_season,
             identity.resolve_identities,
             identity.create_clubs,
+            dbt.build_dbt,
         ],
     )
     await worker.run()

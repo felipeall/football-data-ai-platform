@@ -6,15 +6,17 @@ import time
 from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import httpx
 from psycopg import AsyncConnection
-from temporalio.client import Client
+from temporalio.client import Client, WorkflowHandle
+from temporalio.common import WorkflowIDConflictPolicy
 
 from football_data_ai_platform.config import Settings
 from football_data_ai_platform.fetch_attempts import FetchAttemptStore, SuccessRate
+from football_data_ai_platform.identity.activities import ClubResult, IdentityResolutionResult
 from football_data_ai_platform.identity.store import ClubStore, ClubTaken
-from football_data_ai_platform.identity.workflows import ClubWorkflow, IdentityResolutionWorkflow
 from football_data_ai_platform.ingestion.models import (
     BackfillInput,
     CompetitionSquadsInput,
@@ -44,6 +46,11 @@ from football_data_ai_platform.sources.sofascore.seasons import (
 from football_data_ai_platform.sources.transfermarkt.competitions import PREMIER_LEAGUE
 from football_data_ai_platform.sources.understat.league import (
     PREMIER_LEAGUE as UNDERSTAT_PREMIER_LEAGUE,
+)
+from football_data_ai_platform.transform.workflows import (
+    TRANSFORM_WORKFLOW_ID,
+    TransformResult,
+    TransformWorkflow,
 )
 
 
@@ -176,13 +183,48 @@ async def schedule_understat(settings: Settings) -> None:
     print(f"Schedule {UNDERSTAT_SCHEDULE_ID} {outcome}: daily at 07:00 UTC, paused")
 
 
-async def resolve_identities(settings: Settings) -> None:
-    client = await _client(settings)
-    result = await client.execute_workflow(
-        IdentityResolutionWorkflow.run,
-        id="identity-resolution",
-        task_queue=settings.temporal_task_queue,
+async def start_transform(client: Client, task_queue: str) -> WorkflowHandle[Any, TransformResult]:
+    """Start a Transform Run, or join the one that is going (ADR 31)."""
+    return await client.start_workflow(
+        TransformWorkflow.run,
+        id=TRANSFORM_WORKFLOW_ID,
+        task_queue=task_queue,
+        id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
     )
+
+
+async def transform(settings: Settings) -> None:
+    handle = await start_transform(await _client(settings), settings.temporal_task_queue)
+    print(f"Transform Run {handle.result_run_id}; waiting for it to finish")
+    result = await handle.result()
+    for step_time in result.times:
+        print(f"  {step_time.step:<22} {step_time.seconds:>7.1f}s")
+    for step, build in (
+        ("staging", result.staging),
+        ("clubs and matches", result.clubs_and_matches),
+        ("the rest", result.the_rest),
+    ):
+        print(f"dbt {step}: {build.summary}")
+        for warning in build.warnings:
+            print(f"  {warning}")
+    _print_clubs(result.clubs)
+    _print_identity(result.identity)
+
+
+def _print_clubs(result: ClubResult) -> None:
+    print(
+        f"Clubs (Reep {result.reep_release}): {len(result.created)} created, "
+        f"{result.links_added} links added, {result.clubs} Clubs in all"
+    )
+    for club_id in result.created:
+        print(f"  created {club_id}")
+    if result.unresolved:
+        print(f"{len(result.unresolved)} teams have no Club; their Matches stay out of the marts:")
+    for team in result.unresolved:
+        print(f"  {team.provider} {team.external_id} ({team.name}): {team.reason}")
+
+
+def _print_identity(result: IdentityResolutionResult) -> None:
     reep = f"Reep {result.reep_release} first" if result.reep_release else "no Reep release"
     print(
         f"Identity Resolution ({reep}): {result.players_created} Players created, "
@@ -213,23 +255,6 @@ async def resolve_identities(settings: Settings) -> None:
             )
 
 
-async def create_clubs(settings: Settings) -> None:
-    client = await _client(settings)
-    result = await client.execute_workflow(
-        ClubWorkflow.run, id="create-clubs", task_queue=settings.temporal_task_queue
-    )
-    print(
-        f"Clubs (Reep {result.reep_release}): {len(result.created)} created, "
-        f"{result.links_added} links added, {result.clubs} Clubs in all"
-    )
-    for club_id in result.created:
-        print(f"  created {club_id}")
-    if result.unresolved:
-        print(f"{len(result.unresolved)} teams have no Club; their Matches stay out of the marts:")
-    for team in result.unresolved:
-        print(f"  {team.provider} {team.external_id} ({team.name}): {team.reason}")
-
-
 async def rename_club(settings: Settings, club_id: str, new_id: str) -> None:
     async with (
         await AsyncConnection.connect(settings.database_url) as conn,
@@ -239,7 +264,10 @@ async def rename_club(settings: Settings, club_id: str, new_id: str) -> None:
             await ClubStore(conn).rename(club_id, new_id)
         except ClubTaken as error:
             raise SystemExit(str(error)) from error
-    print(f"Renamed {club_id} to {new_id}; {club_id} stays as an alias. Rebuild the marts.")
+    print(
+        f"Renamed {club_id} to {new_id}; {club_id} stays as an alias."
+        " Run `transform` to rebuild the marts."
+    )
 
 
 REEP_DATA = Path("data/reep")
@@ -303,7 +331,7 @@ async def reep_status(settings: Settings) -> None:
             f"entities: players {deltas.get('player', 0):+}, teams {deltas.get('team', 0):+}; "
             f"ID retention {diff.get('id_retention_pct')} %; gate passed {manifest.gate_passed}"
         )
-    print("To upgrade: set REEP__RELEASE, then run load-reep and resolve-identities.")
+    print("To upgrade: set REEP__RELEASE, then run load-reep and transform.")
 
 
 async def load_reep(settings: Settings) -> None:
@@ -464,18 +492,14 @@ def main() -> None:
         "load-reep",
         help="download, verify and load the pinned Reep release's person and team bridges",
     )
-    commands.add_parser(
-        "create-clubs",
-        help="create and link the Clubs of the stored Matches' teams; run after dbt staging",
-    )
     rename = commands.add_parser(
         "rename-club", help="give a Club a new ID; the old one stays as an alias"
     )
     rename.add_argument("club_id", help="the Club's current ID, e.g. wolverhampton-wanderers")
     rename.add_argument("new_id", help="the new ID, e.g. wolves")
     commands.add_parser(
-        "resolve-identities",
-        help="link staged Source Records to Players; run after dbt builds staging and marts",
+        "transform",
+        help="run dbt, the Clubs and Identity Resolution in order; joins a run that is going",
     )
 
     today = datetime.now(UTC).date()
@@ -507,12 +531,10 @@ def main() -> None:
         asyncio.run(reep_status(settings))
     elif args.command == "load-reep":
         asyncio.run(load_reep(settings))
-    elif args.command == "create-clubs":
-        asyncio.run(create_clubs(settings))
     elif args.command == "rename-club":
         asyncio.run(rename_club(settings, args.club_id, args.new_id))
-    elif args.command == "resolve-identities":
-        asyncio.run(resolve_identities(settings))
+    elif args.command == "transform":
+        asyncio.run(transform(settings))
     elif args.command == "schedule-understat":
         asyncio.run(schedule_understat(settings))
     elif args.command == "understat-backfill":

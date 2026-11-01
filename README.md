@@ -115,7 +115,7 @@ flowchart TD
 
 ### Transforms
 
-dbt owns `staging` and `marts`, and Alembic owns `identity` ([ADR 11](docs/adr/0011-transform-layer.md), [ADR 31](docs/adr/0031-identity-schema-and-transform-runs.md)). A Transform Run builds them in order: staging, then Clubs, then the Club and Match marts, then Identity Resolution for Players, then the marts that read it. Marts lag ingestion by up to a day, which scouting questions can afford. Today the steps run by hand; a `TransformWorkflow` will run them as one serialized run (#70).
+dbt owns `staging` and `marts`, and Alembic owns `identity` ([ADR 11](docs/adr/0011-transform-layer.md), [ADR 31](docs/adr/0031-identity-schema-and-transform-runs.md)). A Transform Run builds them in order: staging, then Clubs, then the Club and Match marts, then Identity Resolution for Players, then the marts that read it. Marts lag ingestion by up to a day, which scouting questions can afford. One `TransformWorkflow` runs them, one run at a time, started by `fdap transform`.
 
 ## Architecture (planned)
 

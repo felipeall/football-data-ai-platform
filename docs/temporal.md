@@ -14,8 +14,9 @@ Code:
 | `src/football_data_ai_platform/ingestion/schedules.py` | Temporal Schedules |
 | `src/football_data_ai_platform/ingestion/worker.py` | The worker process |
 | `src/football_data_ai_platform/ingestion/cli.py` | `fdap`, the CLI that starts workflows and creates Schedules |
-| `src/football_data_ai_platform/identity/workflows.py` | Identity workflows (Clubs, Identity Resolution) |
-| `src/football_data_ai_platform/identity/activities.py` | Identity activities |
+| `src/football_data_ai_platform/identity/activities.py` | Identity activities (Clubs, Identity Resolution) |
+| `src/football_data_ai_platform/transform/workflows.py` | `TransformWorkflow`, the Transform Run, and its dbt selections |
+| `src/football_data_ai_platform/transform/dbt.py` | The dbt activity: `dbt build` as a subprocess |
 
 ## Temporal in brief
 
@@ -122,6 +123,7 @@ Each source has its own retry policy in `workflows.py`, all with the same polite
 | `ingest_season` (Understat, ~380 requests) | 1 h | 1 min | Understat policy |
 | `create_clubs` | 5 min | — | 3 attempts |
 | `resolve_identities` | 10 min | — | 3 attempts |
+| `build_dbt` | 30 min | — | 3 attempts; a failed model or test (exit 1) none |
 
 Long activities heartbeat on every request. A dead worker is then noticed within a minute instead of at the end of the start-to-close timeout.
 
@@ -153,9 +155,8 @@ flowchart TB
         UIW[UnderstatIngestWorkflow]
     end
 
-    subgraph ID["Identity"]
-        CW[ClubWorkflow]
-        IRW[IdentityResolutionWorkflow]
+    subgraph TR["Transform"]
+        TW[TransformWorkflow]
     end
 
     S1 --> FW
@@ -165,8 +166,7 @@ flowchart TB
     C -->|backfill| BW
     C -->|ingest-match| MIW
     C -->|understat-backfill| UIW
-    C -->|create-clubs| CW
-    C -->|resolve-identities| IRW
+    C -->|transform| TW
 ```
 
 ### Workflow IDs and how to start each
@@ -181,10 +181,9 @@ flowchart TB
 | `FixturesWorkflow` | Schedule `post-match-fixtures` | `post-match-fixtures` (plus the Schedule's timestamp suffix) |
 | `PostMatchWorkflow` | `FixturesWorkflow` only | `post-match-<event id>` |
 | `UnderstatIngestWorkflow` | `fdap understat-backfill [--season 2025]`; Schedule `understat-daily` | `understat-EPL[-<year>]`; `understat-daily` |
-| `ClubWorkflow` | `fdap create-clubs` | `create-clubs` |
-| `IdentityResolutionWorkflow` | `fdap resolve-identities` | `identity-resolution` |
+| `TransformWorkflow` | `fdap transform` | `transform`; a start while it runs joins that run |
 
-The CLI uses `execute_workflow`: it waits for the result and prints a summary. Run the CLI on the host with `uv run fdap …`. The workflow runs on whichever worker polls the configured task queue.
+The CLI uses `execute_workflow` (`transform`: `start_workflow`, then the result): it waits for the result and prints a summary. Run the CLI on the host with `uv run fdap …`. The workflow runs on whichever worker polls the configured task queue.
 
 ### Transfermarkt squads
 
@@ -269,24 +268,25 @@ A postponed Match ends its workflow. A later `FixturesWorkflow` run sees the new
 
 The Schedule `understat-daily` runs it at 07:00 UTC with `count=1`, which stores the current season and the Matches played since the last run.
 
-### Identity
+### Transform
 
-`ClubWorkflow` and `IdentityResolutionWorkflow` each wrap one transactional activity that reads dbt's staging models and writes the `identity` schema (ADR 31, ADR 34):
-
-- `create_clubs` creates and links the Clubs of the stored Matches' teams from the pinned Reep release, named after the Transfermarkt club. Without `REEP__RELEASE` it fails non-retryably.
-- `resolve_identities` creates Players and links the staged Source Records to them.
-
-Both have fixed IDs. A start is refused while a run with the same ID is open, including a live run when you start one from a worktree.
-
-Today these steps run by hand, between dbt builds. ADR 34 defines four steps; `TransformWorkflow` (issue #70) will run them as one serialized Transform Run with the fixed ID `transform`, started by a daily Schedule or `fdap transform`:
+`TransformWorkflow` is the Transform Run (ADR 31, amended by ADR 34): four steps, each an activity, run in order.
 
 ```mermaid
 flowchart LR
-    A["1 · dbt build staging"] --> B["2 · ClubWorkflow<br/>create_clubs"]
-    B --> C["3 · dbt build<br/>Clubs and Matches"]
-    C --> D["4 · IdentityResolutionWorkflow<br/>resolve_identities"]
-    D --> E["dbt build the rest<br/>(reads identity)"]
+    A["1 · build_dbt<br/>staging"] --> B["2 · create_clubs"]
+    B --> C["3 · build_dbt<br/>clubs, matches"]
+    C --> D["4 · resolve_identities"]
+    D --> E["build_dbt<br/>the rest"]
 ```
+
+- `build_dbt` runs `dbt build` as a subprocess of the worker, with the step's selection and `--indirect-selection cautious`, so each test runs in the step that builds the last of its parents. dbt writes its target and logs to a temporary directory. Exit 1, a failed model or test, fails non-retryably; a cancelled attempt kills its dbt.
+- `create_clubs` creates and links the Clubs of the stored Matches' teams from the pinned Reep release, named after the Transfermarkt club. Without `REEP__RELEASE` it fails non-retryably.
+- `resolve_identities` creates Players and links the staged Source Records to them.
+
+Each is one transaction or one dbt build, so a retried step starts clean. A team or player that links to nothing is in the result, never a failure. The result carries each step's time, measured with `workflow.now()`.
+
+The workflow ID is fixed, `transform`, and `fdap transform` starts it with `id_conflict_policy=USE_EXISTING`. A start while a run is open joins it and waits for its result, so only one Transform Run runs at a time. That includes a live run when you start one from a worktree: the worktree's command then waits on live's run. No Schedule starts it while the stack is local.
 
 ## Schedules
 
@@ -311,7 +311,7 @@ Workflow tests use `temporalio.testing.WorkflowEnvironment` (fixtures in `tests/
 
 ## Operating and debugging
 
-- **Find a run:** open <http://localhost:8233> and search for the workflow ID from the table above, such as `backfill-17`, `post-match-16363874` or `identity-resolution`.
+- **Find a run:** open <http://localhost:8233> and search for the workflow ID from the table above, such as `backfill-17`, `post-match-16363874` or `transform`.
 - **Read the result:** each workflow returns a dataclass from `models.py` with its counts: `raw_responses` (fetched from the source), `reused` (answered from storage), and failed or not-attempted IDs.
 - **Resume a backfill:** run the same command again. Complete Matches are skipped, and failed or not-attempted ones are fetched.
 - **Worker logs:** `docker compose logs -f worker`.
