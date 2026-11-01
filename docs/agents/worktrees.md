@@ -37,7 +37,12 @@ Report live numbers from the worktree database, and name it in the issue comment
 
 ## The live database
 
-Live moves forward only from `main`: after a pull request merges, the main checkout pulls `main` and runs `docker compose up --wait --build`: `--build` rebuilds the `worker` and `migrate` images from the merged code (without it, Compose reuses the old images), and `migrate` applies new migrations. Start, stop and rebuild the stack from the main checkout only.
+Live moves forward only from `main`: after a pull request merges, the main checkout pulls `main` and runs `scripts/deploy-live.sh`. It runs `docker compose up --wait --build` in the main checkout: `--build` rebuilds the `worker` and `migrate` images from the merged code (without it, Compose reuses the old images), and `migrate` applies new migrations. Start, stop and rebuild the stack from the main checkout only.
+
+Deploy with the script rather than a raw `docker compose up`. Several sessions merge and deploy at once, and two raw deploys fail each other (`worker is missing dependency migrate`). The script:
+
+- takes a lock in the main checkout's `.git/`, so a second deploy waits for the first and prints who holds it. The kernel releases the lock when the deploy's last process exits, so a killed deploy never leaves it stale;
+- removes stopped `migrate` containers first. An interrupted recreate leaves them under a prefixed name (`08b5ade48ff0_football-data-ai-platform-migrate-1`), and they block the next one with `Conflict. The container name … is already in use`. Postgres, Temporal, the worker and every volume are left alone.
 
 ## Work in progress
 
