@@ -35,7 +35,8 @@ RUN apt-get update \
 
 COPY alembic.ini ./
 COPY migrations ./migrations
-# The Transform Run's dbt project (ADR 31); dbt writes its target and logs to a temporary directory.
+# The Transform Run's dbt project (ADR 31); dbt writes its target (kept, for partial parsing)
+# and logs under /tmp, since the project is read-only to the worker.
 COPY dbt ./dbt
 COPY src ./src
 RUN uv sync --locked
