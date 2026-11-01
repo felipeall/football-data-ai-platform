@@ -104,6 +104,8 @@ Each source has its own IDs for the same player, club and Match. The platform gi
 flowchart TD
     R["1 · Reep bridges<br/>link every source's record of a person to one Player"] --> T
     T["2 · Transfermarkt<br/>creates a Player for each squad player Reep missed"] --> S
+    C["Creation check, before 1 and 2 create a Player<br/>same name + birth date as an existing Player → link instead"] -.-> R
+    C -.-> T
     S["3 · Sofascore<br/>birth date within a day + same name → link;<br/>similar name → LLM judge"] --> U
     U["4 · Understat<br/>Sofascore teammate with the same Matches,<br/>Club and minutes → link; close call → LLM judge"] --> H
     H["Ambiguous band<br/>LLM judge, then human review"]

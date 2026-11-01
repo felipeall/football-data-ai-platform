@@ -33,8 +33,9 @@
 - [31. Identity tables in Alembic; dbt in serialized Transform Runs](0031-identity-schema-and-transform-runs.md)
 - [32. The Reep register is the first mapping layer of Identity Resolution](0032-reep-first-mapping-layer.md)
 - [33. The Reep register maps Clubs; the club seed goes](0033-reep-maps-clubs.md) — superseded
-- [34. Canonical IDs are ours, created from Reep, then Transfermarkt](0034-canonical-ids-are-ours.md)
+- [34. Canonical IDs are ours, created from Reep, then Transfermarkt](0034-canonical-ids-are-ours.md) — amended by ADR 35 and ADR 39
 - [35. The PoC covers last season only; Transfermarkt squads for that season](0035-poc-covers-last-season.md)
 - [36. Repository renamed to football-data-ai-platform; internal names stay](0036-repository-renamed.md) — amended by ADR 37 and ADR 38
 - [37. Package and CLI renamed](0037-package-and-cli-renamed.md) — amended by ADR 38
 - [38. Stack identity renamed to football-data-ai-platform](0038-stack-identity-renamed.md)
+- [39. Reep and Transfermarkt create a Player only when no existing Player matches](0039-creation-check.md)
