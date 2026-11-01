@@ -13,6 +13,7 @@ Skills are enabled just in time — at the start of the milestone that needs the
 | `langfuse` | [langfuse/skills](https://github.com/langfuse/skills) | vendored in `.claude/skills/langfuse/` (MIT; the repo publishes no plugin marketplace) | `b86532b` (v1.10.0) | M1 |
 | `dbt` (`using-dbt-for-analytics-engineering`, `adding-dbt-unit-test`, `running-dbt-commands`, …) | [dbt-labs/dbt-agent-skills](https://github.com/dbt-labs/dbt-agent-skills) | plugin `dbt@dbt-agent-marketplace` in `.claude/settings.json`; not `dbt-migration`, which reports telemetry | `b8facde` (v1.6.0) | M3 |
 | `claude-api` | bundled with Claude Code | — | — | always |
+| `football-docs` MCP server: provider docs (Understat, FBref, Transfermarkt, soccerdata, …), metric cards, Reep lookups | [withqwerty/football-docs](https://github.com/withqwerty/football-docs) (MIT) | `.mcp.json`, pinned to `football-docs@0.17.4`, approved by `enabledMcpjsonServers` in `.claude/settings.json`; needs Node.js 22.13+. Reep lookups (`resolve_entity`) read `./data/reep/reep-register.duckdb`, set as `REEP_DUCKDB_PATH` in `.mcp.json`, which `load-reep` keeps pointed at the pinned release | `b1fb1c1` (v0.17.4) | M3 |
 
 ## Planned
 
@@ -23,6 +24,19 @@ Skills are enabled just in time — at the start of the milestone that needs the
 | M7 | `neon-postgres` plugin (includes the Neon MCP server) | [neondatabase/agent-skills](https://github.com/neondatabase/agent-skills) |
 | as needed | `playwright-cli` (Sofascore fallback, UI end-to-end tests) | [microsoft/playwright-cli](https://github.com/microsoft/playwright-cli) |
 | optional | `supabase-postgres-best-practices` | [supabase/agent-skills](https://github.com/supabase/agent-skills) |
+
+### To evaluate
+
+Suggestions from the [withqwerty](https://github.com/withqwerty) repositories (reviewed 2026-11-01), the makers of the Reep register (ADR 32) and of `football-docs` (enabled above). Weigh each one at the start of its milestone. Copying and adapting parts of a plugin goes beyond ADR 26's vendor skills, so adopting one needs an ADR amending ADR 26.
+
+| Milestone | Suggestion | What to evaluate | Source |
+|---|---|---|---|
+| M4 | `football-docs` metric cards for Style Profiles | Checked definitions of xG, xA, progressive passes and carries, PPDA and xT, each variant under its own ID: candidate source for the Style Profile metric definitions (ADR 12). | [withqwerty/football-docs](https://github.com/withqwerty/football-docs) (`docs/metric-cards/`) |
+| M4 | nutmeg `data-reviewer` agent | Reviews football data code: coordinate systems, own goals, set-piece filters, per-90 with a minimum-minutes threshold, sample size, xG source. Candidate for gate-2 reviews of marts and Style Profiles, copied into `.claude/agents/` without the plugin's paths. | [withqwerty/nutmeg](https://github.com/withqwerty/nutmeg) (`agents/data-reviewer.md`) |
+| M4, M5 | nutmeg analysis rules | Minimum minutes, possession-adjusted defensive actions, one named metric variant per stat, and "the stat must carry the claim". Candidates for the Style Profile ADR, the scouting agent's instructions, and eval cases (ADR 9). They become our rules, not a vendored skill. | [withqwerty/nutmeg](https://github.com/withqwerty/nutmeg) (`hooks/session-start.json`, `skills/compute`, `skills/analyse`) |
+| M6 | nutmeg `chart-reviewer` agent, with Campos | Reviews football chart code, including [Campos](https://github.com/withqwerty/campos) (MIT) React pitch and shot-map components, a candidate for the chat's inline charts. | [withqwerty/nutmeg](https://github.com/withqwerty/nutmeg) (`agents/chart-reviewer.md`, `skills/_shared/campos-bridge.md`) |
+
+Do not enable the whole nutmeg plugin: it adds 11 analyst-workflow skills plus hooks that run on every shell command and at the end of every turn. Its README says MIT, but the repository has no `LICENSE` file; keep the licence text with anything copied from it.
 
 No official skill exists for FastAPI, uv/ruff, Fly.io, Auth.js or GitHub Actions (checked 2026-10-12); use their official docs.
 
