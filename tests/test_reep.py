@@ -12,9 +12,11 @@ import pytest
 from psycopg import AsyncConnection
 from temporalio.exceptions import ApplicationError
 
+from football_intel.config import ReepSettings, Settings
 from football_intel.identity.activities import _reep_bridges  # pyright: ignore[reportPrivateUsage]
 from football_intel.identity.rules import Method, Proposal, ReepBridge, reep_proposals
 from football_intel.identity.store import IdentityStore
+from football_intel.ingestion import cli
 from football_intel.reep import load, release
 
 RELEASE = "2026-01-02.1"
@@ -284,6 +286,35 @@ async def reference(connection: AsyncConnection[Any]) -> AsyncConnection[Any]:
 
 def _loaded(directory: Path) -> dict[load.Entity, list[load.Bridge]]:
     return {entity: load.bridges(directory, entity) for entity in load.ENTITIES}
+
+
+async def test_status_prints_the_loaded_releases_even_when_reep_fails(
+    reference: AsyncConnection[Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    files = _write_release(tmp_path)
+    await load.load(reference, release.Manifest(RELEASE, _manifest(files)), _loaded(tmp_path))
+    down = httpx.MockTransport(lambda request: httpx.Response(503))
+    reep_client = release.client
+    monkeypatch.setattr(release, "client", lambda: reep_client(down))
+    settings = Settings().model_copy(
+        update={
+            "postgres_db": f"{Settings().postgres_db}_test",
+            "reep": ReepSettings(release=RELEASE),
+        }
+    )
+
+    with pytest.raises(SystemExit) as error:
+        await cli.reep_status(settings)
+
+    printed = capsys.readouterr().out
+    assert f"Pinned (REEP__RELEASE): {RELEASE}" in printed
+    assert f"Loaded: {RELEASE} on " in printed
+    assert "2 persons (6 bridges), 1 teams (3 bridges)" in printed
+    assert "Reep could not be read" in str(error.value.code)
+    assert "503" in str(error.value.code)
 
 
 async def test_reloading_a_release_replaces_its_rows(

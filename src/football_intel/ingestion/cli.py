@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import httpx
 from psycopg import AsyncConnection
 from temporalio.client import Client
 
@@ -214,16 +215,25 @@ async def reep_status(settings: Settings) -> None:
             """
         )
         loaded = await cursor.fetchall()
-    async with reep_release.client() as api:
-        newer = await reep_release.releases_since(api, pinned)
+    # What we hold is printed before Reep is asked, so a Reep failure does not hide it.
     print(f"Pinned (REEP__RELEASE): {pinned}")
     for release, gate_passed, loaded_at, persons, person_rows, teams, team_rows in loaded:
         print(
             f"Loaded: {release} on {loaded_at:%Y-%m-%d %H:%M} UTC, gate passed: {gate_passed}; "
-            f"{persons} persons ({person_rows} bridges), {teams} teams ({team_rows} bridges)"
+            f"{persons} persons ({person_rows} bridges), {teams} teams ({team_rows} bridges)",
+            flush=True,
         )
     if not loaded:
-        print("Loaded: none; run `football-intel load-reep`")
+        print("Loaded: none; run `football-intel load-reep`", flush=True)
+    try:
+        async with reep_release.client() as api:
+            newer = await reep_release.releases_since(api, pinned)
+    except (
+        httpx.HTTPError,
+        reep_release.ReleaseLayoutError,
+        reep_release.ChecksumMismatchError,
+    ) as error:
+        raise SystemExit(f"Current: Reep could not be read: {error}") from error
     if not newer:
         print("Current: the pinned release is Reep's current one.")
         return
