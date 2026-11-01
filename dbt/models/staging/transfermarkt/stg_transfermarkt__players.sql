@@ -17,6 +17,9 @@ select
     (player ->> 'id')::bigint as player_id,
     player ->> 'name' as name,
     (player -> 'lifeDates' ->> 'dateOfBirth')::date as birth_date,
+    -- Transfermarkt's 0 is no nationality.
+    nullif((player -> 'nationalityDetails' -> 'nationalities' ->> 'nationalityId')::int, 0)
+        as nationality_id,
     countries.name as nationality,
     round((player -> 'attributes' ->> 'height')::numeric * 100)::int as height_cm,
     player -> 'attributes' -> 'position' ->> 'name' as position,

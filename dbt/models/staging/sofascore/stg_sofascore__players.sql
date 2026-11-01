@@ -14,6 +14,7 @@ select distinct on ((player ->> 'id')::bigint)
     player ->> 'name' as name,
     to_timestamp((player ->> 'dateOfBirthTimestamp')::bigint)::date as birth_date,
     player -> 'country' ->> 'name' as nationality,
+    player -> 'country' ->> 'alpha3' as nationality_alpha3,
     player ->> 'position' as position,
     (player ->> 'height')::int as height_cm
 from entries

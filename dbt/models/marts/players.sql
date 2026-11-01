@@ -2,7 +2,8 @@
 -- Sofascore's (Understat has no birth dates). A Player linked to no Source Record yet is
 -- left out. `understat_position` is the Player's usual position in the Understat
 -- Appearances they started in the covered Seasons, the detailed one (DL, AMC…) for Players
--- with no Transfermarkt record.
+-- with no Transfermarkt record. Nationality is our code and name for the country, from the
+-- `country_mappings` seed: Transfermarkt's where it maps, else Sofascore's.
 with links as (
     select * from {{ ref('int_player_links') }}
 ),
@@ -13,7 +14,7 @@ transfermarkt as (
         players.player_id as transfermarkt_player_id,
         players.name,
         players.birth_date,
-        players.nationality,
+        players.nationality_id,
         players.height_cm,
         players.position,
         players.position_group,
@@ -32,7 +33,7 @@ sofascore as (
         players.player_id as sofascore_player_id,
         players.name,
         players.birth_date,
-        players.nationality,
+        players.nationality_alpha3,
         players.height_cm,
         players.position
     from {{ ref('stg_sofascore__players') }} as players
@@ -71,7 +72,8 @@ select
     players.player_id,
     coalesce(transfermarkt.name, sofascore.name, understat.name) as name,
     coalesce(transfermarkt.birth_date, sofascore.birth_date) as birth_date,
-    coalesce(transfermarkt.nationality, sofascore.nationality) as nationality,
+    countries.country_code as nationality_code,
+    countries.name as nationality,
     coalesce(transfermarkt.height_cm, sofascore.height_cm) as height_cm,
     transfermarkt.position,
     transfermarkt.position_group,
@@ -89,6 +91,15 @@ left join transfermarkt on transfermarkt.player_id = players.player_id
 left join sofascore on sofascore.player_id = players.player_id
 left join understat on understat.player_id = players.player_id
 left join understat_positions on understat_positions.player_id = players.player_id
+left join {{ ref('country_mappings') }} as transfermarkt_country
+    on transfermarkt_country.source = 'transfermarkt'
+    and transfermarkt_country.source_country = transfermarkt.nationality_id::text
+left join {{ ref('country_mappings') }} as sofascore_country
+    on sofascore_country.source = 'sofascore'
+    and sofascore_country.source_country = sofascore.nationality_alpha3
+left join {{ ref('countries') }} as countries
+    on countries.country_code
+    = coalesce(transfermarkt_country.country_code, sofascore_country.country_code)
 left join transfermarkt_clubs
     on transfermarkt_clubs.transfermarkt_club_id = transfermarkt.current_club_id
 where exists (select from links where links.player_id = players.player_id)

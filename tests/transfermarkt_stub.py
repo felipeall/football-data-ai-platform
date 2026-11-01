@@ -1,7 +1,11 @@
-"""A synthetic Transfermarkt JSON API for tests. No scraped data (ADR 4): every value is made up.
+"""A synthetic Transfermarkt JSON API for tests. No scraped data (ADR 4): every value is made up,
+but for the countries' public IDs and names.
 
 Club 1 has three players. Player 103 has no transfer history, so upstream answers 404,
-which the SDK tolerates and the recording transport must still store.
+which the SDK tolerates and the recording transport must still store. The players' countries
+are real Transfermarkt IDs and names, so they meet the `country_mappings` seed: 101 is
+English, 102 Ivorian (Transfermarkt spells it `Cote d'Ivoire`), and 103's country is the
+USSR, a former country the seed leaves out. Clubs are in the made-up Testland.
 
 Competition TL1 has clubs 1, 3 and 4. Club 4 has the same squad as club 1; club 3 has no
 squad upstream (404), so ingesting it fails with `NotFound`.
@@ -22,7 +26,10 @@ SQUAD_CLUB_IDS = ("1", "4")
 FAILING_CLUB_ID = "3"
 
 
-def _player(player_id: str, name: str, position: str) -> dict[str, Any]:
+ENGLAND, COTE_D_IVOIRE, USSR = 189, 38, 221
+
+
+def _player(player_id: str, name: str, position: str, nationality_id: int) -> dict[str, Any]:
     return {
         "id": int(player_id),
         "name": name,
@@ -34,16 +41,18 @@ def _player(player_id: str, name: str, position: str) -> dict[str, Any]:
             "contractUntil": "2028-06-30",
         },
         "lifeDates": {"dateOfBirth": "2000-01-01", "age": 25},
-        "nationalityDetails": {"nationalities": {"nationalityId": 1}},
+        "nationalityDetails": {
+            "nationalities": {"nationalityId": nationality_id, "secondNationalityId": 0}
+        },
         "marketValueDetails": {"current": {"value": 10_000_000, "currency": "EUR"}},
         "clubAssignments": [{"type": "current", "clubId": int(CLUB_ID), "start": "2024-07-01"}],
     }
 
 
 PLAYERS = {
-    "101": _player("101", "Alex Keeper", "Goalkeeper"),
-    "102": _player("102", "Sam Back", "Left-Back"),
-    "103": _player("103", "Jo Forward", "Centre-Forward"),
+    "101": _player("101", "Alex Keeper", "Goalkeeper", ENGLAND),
+    "102": _player("102", "Sam Back", "Left-Back", COTE_D_IVOIRE),
+    "103": _player("103", "Jo Forward", "Centre-Forward", USSR),
 }
 HISTORY = {
     "history": {
@@ -57,7 +66,12 @@ HISTORY = {
     }
 }
 ATTRIBUTES = {
-    "countries": [{"id": 1, "name": "Testland"}],
+    "countries": [
+        {"id": 1, "name": "Testland"},
+        {"id": ENGLAND, "name": "England"},
+        {"id": COTE_D_IVOIRE, "name": "Cote d'Ivoire"},
+        {"id": USSR, "name": "UdSSR"},
+    ],
     "confederations": [],
     "competitionTypes": [],
     "contracts": [],

@@ -45,6 +45,12 @@ models:
         data_tests: [unique, not_null]
       - name: name
         data_tests: [not_null]
+      - name: nationality
+        description: Sofascore's name for the player's country, as it spells it.
+      - name: nationality_alpha3
+        description: >
+          Sofascore's code for that country, mapped to a Nationality code in the
+          `country_mappings` seed. ISO alpha-3, except for the home nations (`ENG`, `SCO`).
 
   - name: stg_sofascore__actions
     description: >

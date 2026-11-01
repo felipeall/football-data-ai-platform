@@ -1,11 +1,13 @@
-"""A synthetic Sofascore web API for tests. No scraped data (ADR 4): every value is made up.
+"""A synthetic Sofascore web API for tests. No scraped data (ADR 4): every value is made up,
+but for the countries' public codes and names.
 
 Event 1001 is a finished Match. Players 11 and 12 (home) and 21 and 22 (away) played; 13 sat
 on the bench, so it has no minutes and no heatmap. Player 22 came on late: its heatmap and
 rating breakdown answer 404, which is normal and must not fail the Match. Player 11 scores,
 and player 21 puts the ball in their own net. Events 1003, 1004 and 1005 are
 finished Matches with the same lineups. Event 1002 has not started. Any other event answers
-404.
+404. Players 11 and 21 are Ivorian (Sofascore spells it `Côte d'Ivoire`), the others English,
+under Sofascore's own home-nation code `EN`.
 
 Tournament 17 has four seasons, newest first. Season 501 ("24/25") lists its events on two
 pages: 1005, 1004, a postponed 1006 and 1003, then 1003 again and 1001. Season 502 ("25/26")
@@ -47,6 +49,11 @@ BASE = "/api/v1/event"
 SCORER_STATISTICS = {"goals": 1, "totalShots": 1, "expectedGoals": 0.3, "totalPass": 2}
 
 
+COTE_D_IVOIRE = {"name": "Côte d'Ivoire", "slug": "cote-divoire", "alpha2": "CI", "alpha3": "CIV"}
+ENGLAND = {"name": "England", "slug": "england", "alpha2": "EN", "alpha3": "ENG"}
+IVORIANS = (11, 21)
+
+
 def _entry(player_id: int, minutes: int | None, substitute: bool = False) -> dict[str, Any]:
     statistics: dict[str, Any] = {"ratingVersions": {}}
     if minutes is not None:
@@ -54,7 +61,11 @@ def _entry(player_id: int, minutes: int | None, substitute: bool = False) -> dic
     if player_id == SCORER:
         statistics |= SCORER_STATISTICS
     return {
-        "player": {"id": player_id, "name": f"Player {player_id}"},
+        "player": {
+            "id": player_id,
+            "name": f"Player {player_id}",
+            "country": COTE_D_IVOIRE if player_id in IVORIANS else ENGLAND,
+        },
         "teamId": player_id // 10,
         "position": "M",
         "substitute": substitute,
