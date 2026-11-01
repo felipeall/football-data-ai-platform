@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from contextlib import suppress
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +14,9 @@ import pytest
 from psycopg import AsyncConnection
 from psycopg.conninfo import conninfo_to_dict
 from psycopg.types.json import Jsonb
-from temporalio.testing import ActivityEnvironment
+from temporalio.exceptions import ApplicationError
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
+from temporalio.worker import Worker
 
 from football_data_ai_platform.fetch_attempts import FetchAttemptStore
 from football_data_ai_platform.identity.activities import ClubResult, IdentityActivities
@@ -23,6 +26,13 @@ from football_data_ai_platform.sources import sofascore, transfermarkt, understa
 from football_data_ai_platform.sources.sofascore.matches import MatchNotFinished, fetch_match
 from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
 from football_data_ai_platform.sources.understat import league as understat_league
+from football_data_ai_platform.transform.dbt import DbtActivities
+from football_data_ai_platform.transform.workflows import (
+    CLUBS_AND_MATCHES,
+    STAGING,
+    THE_REST,
+    TransformWorkflow,
+)
 from tests.sofascore_stub import NOT_STARTED_EVENT_ID, SofascoreStub
 from tests.transfermarkt_stub import ATTRIBUTES, CLUB_ID, PLAYERS, SEASON_ID, TransfermarktStub
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub
@@ -175,14 +185,10 @@ async def _store_json(connection: AsyncConnection[Any], source: str, url: str, b
     )
 
 
-async def _create_clubs(
-    connection: AsyncConnection[Any],
-    database_url: str,
-    tmp_path: Path,
-    bridges: list[tuple[str, str, str]] = REEP_TEAM_BRIDGES,
-) -> ClubResult:
-    """Steps 1 and 2 of the Transform Run: dbt staging, then the Club step, from a made-up
-    Reep release and Transfermarkt's club names."""
+async def _store_reep_teams_and_club_names(
+    connection: AsyncConnection[Any], bridges: list[tuple[str, str, str]] = REEP_TEAM_BRIDGES
+) -> None:
+    """A made-up Reep release with team `bridges`, and Transfermarkt's club names."""
     await connection.execute("DELETE FROM reference.reep_releases WHERE release = 'test'")
     await connection.execute(
         "INSERT INTO reference.reep_releases (release, manifest) VALUES ('test', '{}')"
@@ -200,6 +206,16 @@ async def _create_clubs(
         {"success": True, "data": TRANSFERMARKT_CLUBS},
     )
     await _store_json(connection, "transfermarkt", f"{TM_API}/attributes", {"data": ATTRIBUTES})
+
+
+async def _create_clubs(
+    connection: AsyncConnection[Any],
+    database_url: str,
+    tmp_path: Path,
+    bridges: list[tuple[str, str, str]] = REEP_TEAM_BRIDGES,
+) -> ClubResult:
+    """Steps 1 and 2 of the Transform Run: dbt staging, then the Club step."""
+    await _store_reep_teams_and_club_names(connection, bridges)
     _dbt_build(database_url, tmp_path, "--select", "staging")
     return await ActivityEnvironment().run(IdentityActivities(database_url, "test").create_clubs)
 
@@ -278,7 +294,9 @@ async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
     bridges = [b for b in REEP_TEAM_BRIDGES if b[1:] != ("understat", str(CHELSEA))]
 
     result = await _create_clubs(connection, database_url, tmp_path, bridges)
-    build = _dbt_build(database_url, tmp_path)
+    dbt = DbtActivities(database_url, DBT_PROJECT)
+    await ActivityEnvironment().run(dbt.build_dbt, CLUBS_AND_MATCHES)
+    build = await ActivityEnvironment().run(dbt.build_dbt, THE_REST)
 
     assert [(t.provider, t.external_id) for t in result.unresolved] == [("understat", str(CHELSEA))]
     cursor = await connection.execute(
@@ -289,9 +307,9 @@ async def test_dbt_leaves_out_the_matches_of_an_unlinked_team_with_a_warning(
         ("premier-league:2024:league:arsenal:chelsea", 1001, None),
         ("premier-league:2024:league:chelsea:arsenal", 1003, None),
     ]
-    assert any(
-        "WARN 2 warn_matches_left_out_of_the_marts" in line for line in build.stdout.splitlines()
-    ), build.stdout[-4000:]
+    # The Transform Run reports the warning, and goes on.
+    assert len(build.warnings) == 1, build.warnings
+    assert "WARN 2 warn_matches_left_out_of_the_marts " in build.warnings[0]
 
 
 async def test_a_renamed_clubs_former_match_ids_still_resolve(
@@ -493,3 +511,66 @@ async def test_dbt_fails_when_a_candidate_s_source_record_is_not_staged(
         r"in test assert_identity_candidates_have_staged_source_records .*\n.*Got 3 results,",
         result.stdout,
     ), result.stdout[-4000:]
+
+
+async def test_a_transform_run_builds_every_model_from_empty_staging_and_marts(
+    temporal: WorkflowEnvironment, connection: AsyncConnection[Any], database_url: str
+) -> None:
+    # Step 3 must not run a test of a model only step 4 builds (`match_id_aliases`).
+    await connection.execute("DROP SCHEMA IF EXISTS staging, marts CASCADE")
+    await _store_both_sources(connection, 1001, 1003)
+    await _store_reep_teams_and_club_names(connection)
+    identity = IdentityActivities(database_url, "test")
+    task_queue = f"test-{uuid.uuid4()}"
+    async with Worker(
+        temporal.client,
+        task_queue=task_queue,
+        workflows=[TransformWorkflow],
+        activities=[
+            DbtActivities(database_url, DBT_PROJECT).build_dbt,
+            identity.create_clubs,
+            identity.resolve_identities,
+        ],
+    ):
+        result = await temporal.client.execute_workflow(
+            TransformWorkflow.run, id=f"transform-{uuid.uuid4()}", task_queue=task_queue
+        )
+
+    assert result.clubs.created == ["arsenal", "chelsea"]
+    cursor = await connection.execute("SELECT match_id FROM marts.matches ORDER BY match_id")
+    assert await cursor.fetchall() == [
+        ("premier-league:2024:league:arsenal:chelsea",),
+        ("premier-league:2024:league:chelsea:arsenal",),
+    ]
+    # Built in step 4; empty, since no Club was renamed.
+    cursor = await connection.execute("SELECT count(*) FROM marts.match_id_aliases")
+    assert await cursor.fetchone() == (0,)
+    for build in (result.staging, result.clubs_and_matches, result.the_rest):
+        assert " ERROR=0 " in build.summary, build.summary
+
+
+async def test_a_failed_dbt_test_fails_the_build_without_retries(
+    connection: AsyncConnection[Any], database_url: str
+) -> None:
+    dbt = DbtActivities(database_url, DBT_PROJECT)
+    await _store_matches(connection)
+    await ActivityEnvironment().run(dbt.build_dbt, STAGING)
+    cursor = await connection.execute(
+        "INSERT INTO identity.players DEFAULT VALUES RETURNING player_id"
+    )
+    row = await cursor.fetchone()
+    assert row is not None
+    # No stored response holds Sofascore player 999.
+    await connection.execute(
+        "INSERT INTO identity.identity_candidates"
+        " (source, source_record_id, player_id, method, confidence, status)"
+        " VALUES ('sofascore', '999', %s, 'test', 1, 'pending')",
+        (row[0],),
+    )
+
+    # Step 4 runs this test, which reads staging and `identity` both.
+    with pytest.raises(ApplicationError) as failure:
+        await ActivityEnvironment().run(dbt.build_dbt, THE_REST)
+
+    assert failure.value.non_retryable
+    assert "assert_identity_candidates_have_staged_source_records" in failure.value.message

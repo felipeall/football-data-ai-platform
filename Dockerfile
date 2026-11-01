@@ -1,4 +1,4 @@
-# Ingestion worker and migrations. Build context: the repository root.
+# Ingestion worker, with dbt for Transform Runs, and migrations. Build context: the repository root.
 FROM python:3.13-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.0 /uv /bin/uv
@@ -35,6 +35,8 @@ RUN apt-get update \
 
 COPY alembic.ini ./
 COPY migrations ./migrations
+# The Transform Run's dbt project (ADR 31); dbt writes its target and logs to a temporary directory.
+COPY dbt ./dbt
 COPY src ./src
 RUN uv sync --locked
 
