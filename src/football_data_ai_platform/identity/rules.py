@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from football_intel.identity.names import similarity
+from football_data_ai_platform.identity.names import similarity
 
 SOFASCORE = "sofascore"
 TRANSFERMARKT = "transfermarkt"

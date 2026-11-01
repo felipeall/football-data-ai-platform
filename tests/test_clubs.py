@@ -6,15 +6,15 @@ from psycopg import AsyncConnection
 from temporalio.exceptions import ApplicationError
 from temporalio.testing import ActivityEnvironment
 
-from football_intel.identity.activities import IdentityActivities
-from football_intel.identity.clubs import (
+from football_data_ai_platform.identity.activities import IdentityActivities
+from football_data_ai_platform.identity.clubs import (
     ClubPlan,
     Team,
     TransfermarktClub,
     plan_clubs,
     slug,
 )
-from football_intel.identity.store import ClubStore, ClubTaken
+from football_data_ai_platform.identity.store import ClubStore, ClubTaken
 
 
 @pytest.mark.parametrize(

@@ -6,8 +6,8 @@ from typing import Any
 from psycopg import AsyncConnection
 from psycopg.types.json import Jsonb
 
-from football_intel.identity.clubs import SLUG, ClubPlan, LinkKey
-from football_intel.identity.rules import Method, Proposal, RecordKey
+from football_data_ai_platform.identity.clubs import SLUG, ClubPlan, LinkKey
+from football_data_ai_platform.identity.rules import Method, Proposal, RecordKey
 
 
 class IdentityStore:

@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from football_intel.sources.sofascore.api import client, raise_for_failure
+from football_data_ai_platform.sources.sofascore.api import client, raise_for_failure
 
 # Per Match, after the event and its lineups (per-player statistics: Appearances): the
 # shotmap (Shots) and average positions. Per player who appeared: heatmap and rating

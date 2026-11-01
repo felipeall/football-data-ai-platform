@@ -1,4 +1,4 @@
-from football_intel.sources.urls import redact_url
+from football_data_ai_platform.sources.urls import redact_url
 
 
 def test_strips_user_info() -> None:

@@ -85,7 +85,7 @@ docker compose up --wait   # Postgres 17 + pgvector; with COMPOSE_PROFILES=tempo
 - Services are grouped in Compose profiles. Postgres always runs. `temporal` adds Temporal, the `migrate` service and the ingestion `worker`, and `.env.example` turns it on (`COMPOSE_PROFILES=temporal`). `langfuse` adds the Langfuse stack. For dbt work on stored data, Postgres alone is enough: `COMPOSE_PROFILES= docker compose up --wait`, then `uv run alembic upgrade head` if the database is new.
 - Temporal gRPC on `localhost:7233`, web UI at <http://localhost:8233>.
 - Postgres on `localhost:5432`; data lives in the `postgres-data` volume and survives `docker compose down`. `docker compose down -v` deletes it.
-- The Temporal dev server keeps its state (schedules, running and sleeping workflows, history) in SQLite on the `temporal-data` volume, so it survives `docker compose down` and restarts. `docker compose down -v` deletes it with the other volumes. After that, recreate the post-match schedule with `uv run football-intel schedule-post-match`, which is safe to run at any time.
+- The Temporal dev server keeps its state (schedules, running and sleeping workflows, history) in SQLite on the `temporal-data` volume, so it survives `docker compose down` and restarts. `docker compose down -v` deletes it with the other volumes. After that, recreate the post-match schedule with `uv run fdap schedule-post-match`, which is safe to run at any time.
 - To check persistence: start any workflow, run `docker compose down && docker compose up --wait`, then confirm the workflow and the `post-match-fixtures` schedule are still listed in the UI or by `temporal schedule list`.
 - Langfuse runs only with its Compose profile, since nothing traces to it until the agent lands: `docker compose --profile langfuse up --wait`, or `COMPOSE_PROFILES=temporal,langfuse` in `.env`, starts it with its Postgres, ClickHouse, Redis and MinIO, and `docker compose stop langfuse-web langfuse-worker langfuse-postgres clickhouse redis minio` stops them, keeping their volumes. Name the services: `docker compose --profile langfuse stop` stops every service of the active profiles, Postgres included. Langfuse UI at <http://localhost:3000>. It runs v4 in events-only mode: read traces through the v2 Observations API (`/api/public/v2/observations`), since the legacy `/api/public/traces` endpoints answer with an error. The first start creates the `football-intel` organisation, project and API keys, and a user from the `LANGFUSE_INIT_USER_*` variables. Check tracing with `uv run --env-file .env scripts/langfuse_smoke.py`.
 - A `migrate` service applies the database migrations ([ADR 29](docs/adr/0029-migrations-alembic.md)); the `worker` service then runs the ingestion workflows.
@@ -93,13 +93,13 @@ docker compose up --wait   # Postgres 17 + pgvector; with COMPOSE_PROFILES=tempo
 Store one club's squad for one season as Raw Responses (club `985` is Manchester United on Transfermarkt):
 
 ```sh
-uv run football-intel ingest-squad 985 --season 2025
+uv run fdap ingest-squad 985 --season 2025
 ```
 
 Store every Premier League club's squad for a season (`--competition` takes another Transfermarkt competition ID):
 
 ```sh
-uv run football-intel ingest-competition --season 2025
+uv run fdap ingest-competition --season 2025
 ```
 
 That is about 560 upstream requests, so at the default rate limit of one request per second it takes roughly ten minutes. Clubs run as child workflows, three at a time (`--concurrency`); a club that fails is listed at the end without stopping the others. Within the freshness window (24 hours by default) a re-run reuses stored Raw Responses instead of fetching again; `--refresh` fetches anyway. Rate limit, circuit breaker, freshness and proxy are set per source in `.env` (see `.env.example`).
@@ -109,7 +109,7 @@ The runs show in the Temporal UI as `squad-985-2025` and `competition-squads-GB1
 Store one finished Sofascore Match as Raw Responses, by Sofascore event ID (the number at the end of a match page's URL):
 
 ```sh
-uv run football-intel ingest-match 16363874
+uv run fdap ingest-match 16363874
 ```
 
 That stores the event, its lineups with per-player statistics, the shotmap, average positions, and a heatmap and rating breakdown for every player who appeared: about 70 requests, a little over two minutes at Sofascore's default rate of one request every two seconds. Sofascore answers plain HTTP clients with 403, so its requests go through `curl_cffi` with Chrome impersonation ([ADR 14](docs/adr/0014-scraping-access.md)); rate limit, circuit breaker and proxy are set like Transfermarkt's, with `SOFASCORE__*` variables. Sofascore now challenges every request (a 403 with `"reason": "challenge"`) until a Turnstile captcha is solved and exchanged for a Captcha Token. When a request is challenged, the worker launches camoufox, an anti-detect Firefox, for a few seconds. camoufox produces the Turnstile response, and the worker exchanges it for a token that every request then carries, about once an hour ([ADR 30](docs/adr/0030-sofascore-captcha-token.md)). In the worker container the browser runs headed under Xvfb, because headless Linux fails the Turnstile. Run outside the container, it opens a window for a few seconds, or runs headless with `SOFASCORE__CAPTCHA_HEADLESS=true` on macOS. A steady one request per second drew the challenge within minutes, so Sofascore's defaults are half that rate and a 15-minute circuit-breaker cool-down. The run shows in the Temporal UI as `match-16363874`.
@@ -117,8 +117,8 @@ That stores the event, its lineups with per-player statistics, the shotmap, aver
 Backfill every finished Premier League Match of the current season and the two before it ([ADR 5](docs/adr/0005-coverage-and-refresh.md)), or one season with `--season 24/25`:
 
 ```sh
-uv run football-intel backfill --match-level   # first pass: 4 requests a Match
-uv run football-intel backfill --season 24/25  # full pass, a season at a time
+uv run fdap backfill --match-level   # first pass: 4 requests a Match
+uv run fdap backfill --season 24/25  # full pass, a season at a time
 ```
 
 The backfill runs in two passes. The Match-level pass stores the event, lineups with per-player statistics, shotmap and average positions: 4 requests a Match, about 3,300 for three seasons, under two hours. The full pass adds each appearing player's heatmap and rating breakdown, 64 of a Match's ~68 requests and about 56,000 over three seasons (around 31 hours at Sofascore's default rate). Run it slowly, a season at a time; it reuses the Match-level responses still inside the Freshness Window and only needs the per-player ones. Post-match workflows always ingest new Matches in full. A bot challenge is answered with a Captcha Token ([ADR 30](docs/adr/0030-sofascore-captcha-token.md)). Only when no token can be obtained does a challenged Match fail without retries; the season then starts no further Matches and the backfill no further seasons. The run lists the Matches it did not attempt, and a re-run picks them up. Each season runs as a child workflow, and each Match as its own `MatchIngestWorkflow`, three at a time (`--concurrency`), all sharing Sofascore's rate limit. A Match that fails is listed at the end without stopping the others. The run is durable: it survives a worker restart. Re-running it resumes, because Matches already stored completely (every Raw Response a replay needs, none of them a failure) are skipped without a request. Finished Matches do not change, so completeness decides, not the Freshness Window; `--refresh` re-fetches everything anyway. The run shows in the Temporal UI as `backfill-17`.
@@ -126,7 +126,7 @@ The backfill runs in two passes. The Match-level pass stores the event, lineups 
 New Matches can be ingested automatically after they are played, by a daily Schedule. While the stack runs locally, ingestion runs by hand, so the Schedule commands create their Schedules **paused**, and running one again pauses a running Schedule. Create, or update, the Schedule:
 
 ```sh
-uv run football-intel schedule-post-match
+uv run fdap schedule-post-match
 ```
 
 Every day at 06:00 UTC it reads the Premier League's next fixtures and starts one post-match workflow per Match kicking off within eight days, named `post-match-<event id>`; a fixture seen on several days starts only one. Each one sleeps on a durable timer until kickoff + 4 hours (final whistle + 2 hours, [ADR 5](docs/adr/0005-coverage-and-refresh.md)), then checks the Match. Finished, it is ingested like `ingest-match`. Moved to a new kickoff, the wait starts over. Still on, it is checked again every 30 minutes, up to 12 times. Postponed or cancelled, the workflow ends, and a later run picks up the new date. Start it with `temporal schedule toggle --schedule-id post-match-fixtures --unpause --reason "<why>"`, or run it once while paused with `temporal schedule trigger --schedule-id post-match-fixtures`. Pausing the Schedule does not stop post-match workflows already started: each still ingests its Match after its timer.
@@ -134,9 +134,9 @@ Every day at 06:00 UTC it reads the Premier League's next fixtures and starts on
 Understat is the second, independent source of xG ([ADR 3](docs/adr/0003-live-data-sources.md)). Store its last three Premier League seasons, or one season by its start year (`2025` is 25/26):
 
 ```sh
-uv run football-intel understat-backfill            # current season and the two before it
-uv run football-intel understat-backfill --season 2025
-uv run football-intel schedule-understat            # daily at 07:00 UTC, current season; created paused
+uv run fdap understat-backfill            # current season and the two before it
+uv run fdap understat-backfill --season 2025
+uv run fdap schedule-understat            # daily at 07:00 UTC, current season; created paused
 ```
 
 Each season is one request for the league data (teams, players and fixtures, always fetched fresh) plus one per played Match (rosters and Shots), about 1 request per second (`UNDERSTAT__REQUESTS_PER_SECOND`). A Match already stored is not requested again. A Match the league data lists as played whose data answers 404 is listed as failed, and the next run tries it again. The daily Schedule runs the same workflow for the current season only, so it picks up the previous day's Matches. Understat answers every data request without the `X-Requested-With: XMLHttpRequest` header with a 404, the same as for a Match that does not exist; the client always sends it.
@@ -144,7 +144,7 @@ Each season is one request for the league data (teams, players and fixtures, alw
 Every upstream request also leaves one Fetch Attempt in `raw.fetch_attempts`, including timeouts, transport errors, circuit-breaker rejections and reuses of a fresh Raw Response. Print each source's outcomes and success rate per day (UTC) for the last seven days, or for a range with `--from` and `--to`:
 
 ```sh
-uv run football-intel success-rates --from 2026-10-01 --to 2026-10-13
+uv run fdap success-rates --from 2026-10-01 --to 2026-10-13
 ```
 
 The success rate shows breakage: successful answers and 404s (the source answered; the thing does not exist) over the attempts that reached the source. Circuit-breaker rejections and reuses never reached it, so they are counted but left out of the rate. An answer counts as blocked when it is a 403 or 429, or when the source's own failure test rejects it, such as Transfermarkt's WAF challenge served with a 200. The same numbers are in the `raw.source_success_rates` view.
@@ -153,7 +153,7 @@ Transforms run in dbt ([ADR 11](docs/adr/0011-transform-layer.md)), from the pro
 
 ```sh
 uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt --select staging --exclude source:identity+
-uv run football-intel create-clubs
+uv run fdap create-clubs
 uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt
 ```
 
@@ -170,9 +170,9 @@ Clubs, Competitions and Stages have our own IDs, kept in `identity` ([ADR 34](do
 Identity Resolution creates Players and links the staged Source Records to them ([ADR 6](docs/adr/0006-identity-resolution.md), [ADR 31](docs/adr/0031-identity-schema-and-transform-runs.md), [ADR 32](docs/adr/0032-reep-first-mapping-layer.md), [ADR 34](docs/adr/0034-canonical-ids-are-ours.md)). The [Reep](https://reep.football) register, from a pinned release, and Transfermarkt create Players; Sofascore and Understat only link to them. Pin the release in `.env` (`REEP__RELEASE=2026-10-31.1`), load it once, then run Identity Resolution after `dbt build`:
 
 ```sh
-uv run football-intel reep-status          # pinned, loaded and current releases, and what changed
-uv run football-intel load-reep            # download, verify and load the pinned release
-uv run football-intel resolve-identities
+uv run fdap reep-status          # pinned, loaded and current releases, and what changed
+uv run fdap load-reep            # download, verify and load the pinned release
+uv run fdap resolve-identities
 ```
 
 - **Checking for a new release.** Reep publishes data releases on `data.reep.football`, often more than once a week. Nothing announces them, and the GitHub repository's tags are code versions, not data. `reep-status` reads `releases/latest.json`, then each newer release's manifest, found through its file list (`releases/<release>/release.json`). A manifest describes the changes from its predecessor: new bridges per provider, the change in players and teams, ID retention, and the release's own quality gate. It also counts the persons, teams and bridges of each loaded release, and prints them before it calls Reep, so they show even when Reep can't be read (the command then exits with an error). It downloads no bridges.

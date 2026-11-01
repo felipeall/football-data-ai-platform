@@ -15,10 +15,10 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 
-from football_intel.fetch_attempts import FetchAttempt, FetchAttemptStore, FetchOutcome
-from football_intel.raw_responses import RawResponse, RawResponseStore
-from football_intel.sources.interface import CircuitOpenError
-from football_intel.sources.urls import redact_url
+from football_data_ai_platform.fetch_attempts import FetchAttempt, FetchAttemptStore, FetchOutcome
+from football_data_ai_platform.raw_responses import RawResponse, RawResponseStore
+from football_data_ai_platform.sources.interface import CircuitOpenError
+from football_data_ai_platform.sources.urls import redact_url
 
 logger = logging.getLogger(__name__)
 

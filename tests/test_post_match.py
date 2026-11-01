@@ -9,21 +9,24 @@ from temporalio.client import ScheduleCalendarSpec, ScheduleOverlapPolicy, Sched
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.ingestion.activities import SofascoreActivities
-from football_intel.ingestion.models import (
+from football_data_ai_platform.ingestion.activities import SofascoreActivities
+from football_data_ai_platform.ingestion.models import (
     FixturesInput,
     FixturesResult,
     PostMatchInput,
     PostMatchResult,
 )
-from football_intel.ingestion.schedules import ensure_post_match_schedule, post_match_schedule
-from football_intel.ingestion.workflows import (
+from football_data_ai_platform.ingestion.schedules import (
+    ensure_post_match_schedule,
+    post_match_schedule,
+)
+from football_data_ai_platform.ingestion.workflows import (
     FixturesWorkflow,
     MatchIngestWorkflow,
     PostMatchWorkflow,
 )
-from football_intel.sources import sofascore
-from football_intel.sources.interface import SourceInterface, SourcePolicy
+from football_data_ai_platform.sources import sofascore
+from football_data_ai_platform.sources.interface import SourceInterface, SourcePolicy
 from tests.sofascore_stub import EVENT_ID, PLAYED, SEASONS, TOURNAMENT_ID, SofascoreStub
 
 EVENT_PATH = f"/api/v1/event/{EVENT_ID}"

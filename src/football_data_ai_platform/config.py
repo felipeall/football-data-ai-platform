@@ -3,8 +3,8 @@
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from football_intel.sources.interface import SourcePolicy
-from football_intel.sources.sofascore import SofascorePolicy
+from football_data_ai_platform.sources.interface import SourcePolicy
+from football_data_ai_platform.sources.sofascore import SofascorePolicy
 
 
 class ReepSettings(BaseModel):

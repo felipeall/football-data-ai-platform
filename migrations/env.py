@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine
 
-from football_intel.config import Settings
+from football_data_ai_platform.config import Settings
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):

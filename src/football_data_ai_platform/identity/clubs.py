@@ -4,7 +4,7 @@ import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
-from football_intel.identity.names import to_ascii
+from football_data_ai_platform.identity.names import to_ascii
 
 # Whole tokens that name a club's legal form, not the club.
 _DROPPED_TOKENS = frozenset({"fc", "afc", "cf"})

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from football_intel.sources.sofascore.api import client, raise_for_failure
+from football_data_ai_platform.sources.sofascore.api import client, raise_for_failure
 
 PREMIER_LEAGUE = 17  # Sofascore's unique-tournament ID
 

@@ -8,8 +8,13 @@ from psycopg import AsyncConnection
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from football_intel.identity.clubs import Team, TransfermarktClub, UnresolvedTeam, plan_clubs
-from football_intel.identity.rules import (
+from football_data_ai_platform.identity.clubs import (
+    Team,
+    TransfermarktClub,
+    UnresolvedTeam,
+    plan_clubs,
+)
+from football_data_ai_platform.identity.rules import (
     SOFASCORE,
     TRANSFERMARKT,
     UNDERSTAT,
@@ -25,7 +30,7 @@ from football_intel.identity.rules import (
     transfermarkt_players,
     understat_proposals,
 )
-from football_intel.identity.store import ClubStore, IdentityStore
+from football_data_ai_platform.identity.store import ClubStore, IdentityStore
 
 
 @dataclass(frozen=True)
@@ -411,14 +416,14 @@ _TEAMS: LiteralString = """
 
 
 async def _require_release(conn: AsyncConnection[Any], release: str) -> None:
-    """Fails without retries if the release is not loaded: `football-intel load-reep`
+    """Fails without retries if the release is not loaded: `fdap load-reep`
     loads it."""
     cursor = await conn.execute(
         "SELECT 1 FROM reference.reep_releases WHERE release = %s", (release,)
     )
     if await cursor.fetchone() is None:
         raise ApplicationError(
-            f"Reep release {release} is not loaded; run `football-intel load-reep`",
+            f"Reep release {release} is not loaded; run `fdap load-reep`",
             type="ReepReleaseNotLoaded",
             non_retryable=True,
         )

@@ -15,14 +15,14 @@ from psycopg.conninfo import conninfo_to_dict
 from psycopg.types.json import Jsonb
 from temporalio.testing import ActivityEnvironment
 
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.identity.activities import ClubResult, IdentityActivities
-from football_intel.identity.store import ClubStore
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources import sofascore, transfermarkt, understat
-from football_intel.sources.sofascore.matches import MatchNotFinished, fetch_match
-from football_intel.sources.transfermarkt.squads import fetch_squad
-from football_intel.sources.understat import league as understat_league
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.identity.activities import ClubResult, IdentityActivities
+from football_data_ai_platform.identity.store import ClubStore
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources import sofascore, transfermarkt, understat
+from football_data_ai_platform.sources.sofascore.matches import MatchNotFinished, fetch_match
+from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
+from football_data_ai_platform.sources.understat import league as understat_league
 from tests.sofascore_stub import NOT_STARTED_EVENT_ID, SofascoreStub
 from tests.transfermarkt_stub import ATTRIBUTES, CLUB_ID, PLAYERS, SEASON_ID, TransfermarktStub
 from tests.understat_stub import ARSENAL, CHELSEA, LEAGUE, UnderstatStub

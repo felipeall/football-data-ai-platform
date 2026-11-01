@@ -9,8 +9,8 @@ from psycopg import AsyncConnection
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from football_intel.fetch_attempts import FetchAttemptStore
-from football_intel.ingestion.models import (
+from football_data_ai_platform.fetch_attempts import FetchAttemptStore
+from football_data_ai_platform.ingestion.models import (
     CompetitionClubsInput,
     CompetitionClubsResult,
     CompleteMatchesInput,
@@ -28,27 +28,27 @@ from football_intel.ingestion.models import (
     UnderstatSeasonInput,
     UnderstatSeasonResult,
 )
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources import sofascore, transfermarkt, understat
-from football_intel.sources.interface import CircuitOpenError, SourceInterface
-from football_intel.sources.recording import RawResponseMissingError, RecordingTransport
-from football_intel.sources.sofascore.api import UpstreamError
-from football_intel.sources.sofascore.matches import (
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources import sofascore, transfermarkt, understat
+from football_data_ai_platform.sources.interface import CircuitOpenError, SourceInterface
+from football_data_ai_platform.sources.recording import RawResponseMissingError, RecordingTransport
+from football_data_ai_platform.sources.sofascore.api import UpstreamError
+from football_data_ai_platform.sources.sofascore.matches import (
     MatchNotFinished,
     MatchNotFound,
     fetch_match,
     fetch_match_status,
 )
-from football_intel.sources.sofascore.seasons import (
+from football_data_ai_platform.sources.sofascore.seasons import (
     SeasonNotFound,
     fetch_finished_event_ids,
     fetch_seasons,
     fetch_upcoming_fixtures,
 )
-from football_intel.sources.transfermarkt.competitions import fetch_competition_clubs
-from football_intel.sources.transfermarkt.squads import fetch_squad
-from football_intel.sources.understat import api as understat_api
-from football_intel.sources.understat import league as understat_league
+from football_data_ai_platform.sources.transfermarkt.competitions import fetch_competition_clubs
+from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
+from football_data_ai_platform.sources.understat import api as understat_api
+from football_data_ai_platform.sources.understat import league as understat_league
 
 
 class TransfermarktActivities:

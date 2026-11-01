@@ -10,12 +10,15 @@ from temporalio.client import ScheduleCalendarSpec, ScheduleOverlapPolicy, Workf
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
-from football_intel.ingestion.activities import UnderstatActivities
-from football_intel.ingestion.models import UnderstatIngestInput, UnderstatIngestResult
-from football_intel.ingestion.schedules import ensure_understat_schedule
-from football_intel.ingestion.workflows import UnderstatIngestWorkflow, current_understat_year
-from football_intel.sources import understat
-from football_intel.sources.interface import SourceInterface, SourcePolicy
+from football_data_ai_platform.ingestion.activities import UnderstatActivities
+from football_data_ai_platform.ingestion.models import UnderstatIngestInput, UnderstatIngestResult
+from football_data_ai_platform.ingestion.schedules import ensure_understat_schedule
+from football_data_ai_platform.ingestion.workflows import (
+    UnderstatIngestWorkflow,
+    current_understat_year,
+)
+from football_data_ai_platform.sources import understat
+from football_data_ai_platform.sources.interface import SourceInterface, SourcePolicy
 from tests.understat_stub import LEAGUE, MISSING_MATCH_ID, UnderstatStub
 
 

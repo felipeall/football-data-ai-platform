@@ -1,6 +1,6 @@
 # Worktrees and the shared stack
 
-Several agents work at once, each in an Orca worktree under `~/orca/workspaces/football-intel/`. They share one local stack: `compose.yaml` fixes the project name `football-intel`, so every checkout talks to the same Postgres, Temporal and `worker` container.
+Several agents work at once, each in an Orca worktree under `~/orca/workspaces/football-data-ai-platform/`. They share one local stack: `compose.yaml` fixes the project name `football-intel`, so every checkout talks to the same Postgres, Temporal and `worker` container.
 
 The **main checkout** (`git rev-parse --git-common-dir`, one level up) owns that stack and the **live** database `football_intel`. The `worker` container runs `main`'s code against live, on the `ingestion` task queue. A **worktree** works against its own database and task queue, so its branch code never reaches live data or the live worker.
 
@@ -28,7 +28,7 @@ A live check runs on a copy of live, never on live itself:
 1. `scripts/worktree.sh refresh-db` replaces the worktree database with a copy of live (about 300 MB, 15 s).
 2. Migrate it from the worktree: `uv run alembic upgrade head`.
 3. Run dbt with the worktree's settings: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt …`.
-4. For CLI commands that start a workflow (`create-clubs`, `resolve-identities`, the ingest commands), start a worker from the worktree on its own queue, `uv run --env-file .env python -m football_intel.ingestion.worker`, then run the command from the worktree. Without that worker the workflow waits on the worktree queue, untouched.
+4. For CLI commands that start a workflow (`create-clubs`, `resolve-identities`, the ingest commands), start a worker from the worktree on its own queue, `uv run --env-file .env python -m football_data_ai_platform.ingestion.worker`, then run the command from the worktree. Without that worker the workflow waits on the worktree queue, untouched.
 
 Workflow IDs are fixed (`create-clubs`, `identity-resolution`) and share the `default` namespace with live, so a start is refused while a live run with the same ID is open. Wait for it to close (Temporal UI, <http://localhost:8233>). ADR 31's `transform` (#70) will join an open run instead.
 

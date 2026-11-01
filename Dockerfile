@@ -44,4 +44,4 @@ USER worker
 # Xvfb in the background with a full-size screen. A restarted container keeps the last
 # run's lock file, which would stop Xvfb; exec keeps the worker as the process that receives
 # the container's stop signal (compose runs an init that reaps leftover browser processes).
-CMD ["sh", "-c", "rm -f /tmp/.X99-lock; Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & exec python -m football_intel.ingestion.worker"]
+CMD ["sh", "-c", "rm -f /tmp/.X99-lock; Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp & exec python -m football_data_ai_platform.ingestion.worker"]

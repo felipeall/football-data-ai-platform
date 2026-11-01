@@ -9,7 +9,7 @@ import duckdb
 from psycopg import AsyncConnection, sql
 from psycopg.types.json import Jsonb
 
-from football_intel.reep.release import Manifest
+from football_data_ai_platform.reep.release import Manifest
 
 Bridge = tuple[str, str, str, str | None, str | None]  # reep_id, provider, external_id, rule, scope
 

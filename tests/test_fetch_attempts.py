@@ -5,23 +5,23 @@ import httpx
 import pytest
 from psycopg import AsyncConnection
 
-from football_intel.fetch_attempts import (
+from football_data_ai_platform.fetch_attempts import (
     FetchAttempt,
     FetchAttemptStore,
     FetchOutcome,
     SuccessRate,
 )
-from football_intel.ingestion.cli import format_success_rates
-from football_intel.raw_responses import RawResponseStore
-from football_intel.sources.interface import (
+from football_data_ai_platform.ingestion.cli import format_success_rates
+from football_data_ai_platform.raw_responses import RawResponseStore
+from football_data_ai_platform.sources.interface import (
     CircuitOpenError,
     SourceInterface,
     SourcePolicy,
     is_server_failure,
 )
-from football_intel.sources.recording import RecordingTransport
-from football_intel.sources.transfermarkt import recording_transport
-from football_intel.sources.transfermarkt.squads import fetch_squad
+from football_data_ai_platform.sources.recording import RecordingTransport
+from football_data_ai_platform.sources.transfermarkt import recording_transport
+from football_data_ai_platform.sources.transfermarkt.squads import fetch_squad
 from tests.transfermarkt_stub import CLUB_ID, SEASON_ID, TransfermarktStub
 
 BASE = "https://fake.example"

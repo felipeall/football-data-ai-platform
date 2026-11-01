@@ -12,12 +12,12 @@ import pytest
 from psycopg import AsyncConnection
 from temporalio.exceptions import ApplicationError
 
-from football_intel.config import ReepSettings, Settings
-from football_intel.identity.activities import _reep_bridges  # pyright: ignore[reportPrivateUsage]
-from football_intel.identity.rules import Method, Proposal, ReepBridge, reep_proposals
-from football_intel.identity.store import IdentityStore
-from football_intel.ingestion import cli
-from football_intel.reep import load, release
+from football_data_ai_platform.config import ReepSettings, Settings
+from football_data_ai_platform.identity.activities import _reep_bridges  # pyright: ignore[reportPrivateUsage]
+from football_data_ai_platform.identity.rules import Method, Proposal, ReepBridge, reep_proposals
+from football_data_ai_platform.identity.store import IdentityStore
+from football_data_ai_platform.ingestion import cli
+from football_data_ai_platform.reep import load, release
 
 RELEASE = "2026-01-02.1"
 PREVIOUS = "2026-01-01.1"

@@ -7,10 +7,10 @@ from alembic import command
 from alembic.config import Config
 from psycopg import AsyncConnection, sql
 
-from football_intel.config import Settings
-from football_intel.identity.activities import Resolution, SourceRecords, resolve
-from football_intel.identity.names import normalize, similarity
-from football_intel.identity.rules import (
+from football_data_ai_platform.config import Settings
+from football_data_ai_platform.identity.activities import Resolution, SourceRecords, resolve
+from football_data_ai_platform.identity.names import normalize, similarity
+from football_data_ai_platform.identity.rules import (
     ACCEPT_FROM,
     JUDGE_FROM,
     Appearance,
@@ -22,7 +22,7 @@ from football_intel.identity.rules import (
     sofascore_proposals,
     understat_proposals,
 )
-from football_intel.identity.store import IdentityStore
+from football_data_ai_platform.identity.store import IdentityStore
 
 BORN = date(1999, 5, 1)
 RELEASE = "2026-01-02.1"

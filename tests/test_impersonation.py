@@ -7,8 +7,12 @@ from collections.abc import AsyncIterator
 import httpx
 import pytest
 
-from football_intel.sources.impersonation import ImpersonatingTransport
-from football_intel.sources.interface import CircuitOpenError, SourceInterface, SourcePolicy
+from football_data_ai_platform.sources.impersonation import ImpersonatingTransport
+from football_data_ai_platform.sources.interface import (
+    CircuitOpenError,
+    SourceInterface,
+    SourcePolicy,
+)
 
 
 @pytest.fixture
