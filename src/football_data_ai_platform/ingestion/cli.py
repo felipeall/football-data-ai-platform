@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import time
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 import httpx
 from psycopg import AsyncConnection
 from temporalio.client import Client, WorkflowHandle
-from temporalio.common import WorkflowIDConflictPolicy
+from temporalio.exceptions import WorkflowAlreadyStartedError
 
 from football_data_ai_platform.config import Settings
 from football_data_ai_platform.fetch_attempts import FetchAttemptStore, SuccessRate
@@ -183,20 +184,52 @@ async def schedule_understat(settings: Settings) -> None:
     print(f"Schedule {UNDERSTAT_SCHEDULE_ID} {outcome}: daily at 07:00 UTC, paused")
 
 
-async def start_transform(client: Client, task_queue: str) -> WorkflowHandle[Any, TransformResult]:
+@dataclass(frozen=True)
+class TransformStart:
+    """A Transform Run this command started, or the open one it joined (ADR 31)."""
+
+    handle: WorkflowHandle[Any, TransformResult]
+    task_queue: str
+    start_time: datetime | None = None
+    """When the joined run started; None when this command started it."""
+
+    @property
+    def joined(self) -> bool:
+        return self.start_time is not None
+
+    def message(self, own_task_queue: str) -> str:
+        run_id = self.handle.result_run_id
+        if self.start_time is None:
+            return f"Started Transform Run {run_id}; waiting for it to finish"
+        started = f"{self.start_time:%Y-%m-%d %H:%M:%S %Z}"
+        line = f"Joined Transform Run {run_id}, started {started}; waiting for it to finish"
+        if self.task_queue != own_task_queue:
+            line += (
+                f"\nIt runs on queue {self.task_queue}, not yours ({own_task_queue}):"
+                " it writes to that worker's database"
+            )
+        return line
+
+
+async def start_transform(client: Client, task_queue: str) -> TransformStart:
     """Start a Transform Run, or join the one that is going (ADR 31)."""
-    return await client.start_workflow(
-        TransformWorkflow.run,
-        id=TRANSFORM_WORKFLOW_ID,
-        task_queue=task_queue,
-        id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
-    )
+    try:
+        handle = await client.start_workflow(
+            TransformWorkflow.run, id=TRANSFORM_WORKFLOW_ID, task_queue=task_queue
+        )
+    except WorkflowAlreadyStartedError as err:
+        handle = client.get_workflow_handle_for(
+            TransformWorkflow.run, TRANSFORM_WORKFLOW_ID, run_id=err.run_id
+        )
+        description = await handle.describe()
+        return TransformStart(handle, description.task_queue, description.start_time)
+    return TransformStart(handle, task_queue)
 
 
 async def transform(settings: Settings) -> None:
-    handle = await start_transform(await _client(settings), settings.temporal_task_queue)
-    print(f"Transform Run {handle.result_run_id}; waiting for it to finish")
-    result = await handle.result()
+    start = await start_transform(await _client(settings), settings.temporal_task_queue)
+    print(start.message(settings.temporal_task_queue))
+    result = await start.handle.result()
     for step_time in result.times:
         print(f"  {step_time.step:<22} {step_time.seconds:>7.1f}s")
     for step, build in (

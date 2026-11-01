@@ -31,7 +31,7 @@ A live check runs on a copy of live, never on live itself:
 2. Migrate it from the worktree: `uv run alembic upgrade head`.
 3. For CLI commands that start a workflow (`transform`, the ingest commands), start a worker from the worktree on its own queue, `uv run --env-file .env python -m football_data_ai_platform.ingestion.worker`, then run the command from the worktree. Without that worker the workflow waits on the worktree queue, untouched.
 
-Some workflow IDs are fixed and share the `default` namespace with live. `transform` is one: a worktree's `fdap transform` while a live Transform Run is open joins the live run, on live's queue and database, instead of starting its own. Check the Temporal UI (<http://localhost:8233>) for an open `transform` first, and wait for it to close. A worktree's own dbt work outside a run: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt …`.
+Some workflow IDs are fixed and share the `default` namespace with live. `transform` is one: a worktree's `fdap transform` while a live Transform Run is open joins the live run, on live's queue and database, instead of starting its own. The command then prints `Joined Transform Run …` and warns that the run is on another queue. Check the Temporal UI (<http://localhost:8233>) for an open `transform` first, and wait for it to close. A worktree's own dbt work outside a run: `uv run --env-file .env dbt build --project-dir dbt --profiles-dir dbt …`.
 
 Report live numbers from the worktree database, and name it in the issue comment.
 

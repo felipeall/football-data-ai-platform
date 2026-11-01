@@ -286,7 +286,7 @@ flowchart LR
 
 Each is one transaction or one dbt build, so a retried step starts clean. A team or player that links to nothing is in the result, never a failure. The result carries each step's time, measured with `workflow.now()`.
 
-The workflow ID is fixed, `transform`, and `fdap transform` starts it with `id_conflict_policy=USE_EXISTING`. A start while a run is open joins it and waits for its result, so only one Transform Run runs at a time. That includes a live run when you start one from a worktree: the worktree's command then waits on live's run. No Schedule starts it while the stack is local.
+The workflow ID is fixed, `transform`. `fdap transform` tries to start it. If a run is already open, Temporal refuses the start with `WorkflowAlreadyStartedError`, and the command joins the open run and waits for its result instead, so only one Transform Run runs at a time. The command says which happened: `Started Transform Run <run id>`, or `Joined Transform Run <run id>, started <time>`. A joined run can be live's, started from a worktree. When the joined run's task queue isn't the caller's, the command names that queue and warns that the run writes to that worker's database. No Schedule starts it while the stack is local.
 
 ## Schedules
 
