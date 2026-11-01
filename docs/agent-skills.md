@@ -13,7 +13,7 @@ Skills are enabled just in time — at the start of the milestone that needs the
 | `langfuse` | [langfuse/skills](https://github.com/langfuse/skills) | vendored in `.claude/skills/langfuse/` (MIT; the repo publishes no plugin marketplace) | `b86532b` (v1.10.0) | M1 |
 | `dbt` (`using-dbt-for-analytics-engineering`, `adding-dbt-unit-test`, `running-dbt-commands`, …) | [dbt-labs/dbt-agent-skills](https://github.com/dbt-labs/dbt-agent-skills) | plugin `dbt@dbt-agent-marketplace` in `.claude/settings.json`; not `dbt-migration`, which reports telemetry | `b8facde` (v1.6.0) | M3 |
 | `claude-api` | bundled with Claude Code | — | — | always |
-| `football-docs` MCP server: provider docs (Understat, FBref, Transfermarkt, soccerdata, …), metric cards, Reep lookups | [withqwerty/football-docs](https://github.com/withqwerty/football-docs) (MIT) | `.mcp.json`, pinned to `football-docs@0.17.4`, approved by `enabledMcpjsonServers` in `.claude/settings.json`; needs Node.js 22.13+ | `b1fb1c1` (v0.17.4) | M3 |
+| `football-docs` MCP server: provider docs (Understat, FBref, Transfermarkt, soccerdata, …), metric cards, Reep lookups | [withqwerty/football-docs](https://github.com/withqwerty/football-docs) (MIT) | `.mcp.json`, pinned to `football-docs@0.17.4`, approved by `enabledMcpjsonServers` in `.claude/settings.json`; needs Node.js 22.13+. For Reep lookups (`resolve_entity`), set `REEP_DUCKDB_PATH` in your shell to the absolute path of `data/reep/reep-register.duckdb` in the main checkout, which `load-reep` keeps pointed at the pinned release | `b1fb1c1` (v0.17.4) | M3 |
 
 ## Planned
 

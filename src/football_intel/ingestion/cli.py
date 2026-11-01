@@ -307,6 +307,7 @@ async def load_reep(settings: Settings) -> None:
     directory = REEP_DATA / release
     async with reep_release.client() as api:
         manifest = await reep_release.download(api, release, directory)
+    duckdb_link = reep_release.link_duckdb(REEP_DATA, release)
     started = time.monotonic()
     loaded = {entity: reep_load.bridges(directory, entity) for entity in reep_load.ENTITIES}
     async with await AsyncConnection.connect(settings.database_url, autocommit=True) as conn:
@@ -319,6 +320,10 @@ async def load_reep(settings: Settings) -> None:
         f"Reep {release}: {counts} bridged to at least {reep_load.MIN_PROVIDERS} of "
         f"{', '.join(REEP_PROVIDERS)}, loaded in {time.monotonic() - started:.0f} s; "
         f"release gate passed: {manifest.gate_passed}"
+    )
+    print(
+        f"Reep register for football-docs: {duckdb_link.resolve()}; point REEP_DUCKDB_PATH "
+        f"at {duckdb_link.absolute()}"
     )
 
 

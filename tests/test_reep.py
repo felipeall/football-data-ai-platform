@@ -62,6 +62,8 @@ def _write_release(directory: Path) -> dict[str, bytes]:
         db.executemany("INSERT INTO r VALUES (?, ?)", REDIRECTS)
         db.execute(f"COPY b TO '{directory / 'bridges.parquet'}' (FORMAT parquet)")
         db.execute(f"COPY r TO '{directory / 'redirects.parquet'}' (FORMAT parquet)")
+    # The loader never reads the DuckDB register, so any bytes stand in for it.
+    (directory / release.DUCKDB).write_bytes(b"a stand-in for the DuckDB register")
     return {name: (directory / name).read_bytes() for name in release.FILES}
 
 
@@ -165,9 +167,9 @@ async def test_a_release_downloads_once_verified_from_its_objects(tmp_path: Path
         _object(RELEASE, "manifest.json")
     ]
     assert {name: (target / name).read_bytes() for name in release.FILES} == files
-    # The second run finds both files verified and fetches only release.json and the manifest.
-    assert stub.requests.count(_object(RELEASE, "bridges.parquet")) == 1
-    assert stub.requests.count(_object(RELEASE, "redirects.parquet")) == 1
+    # The second run finds every file verified and fetches only release.json and the manifest.
+    for name in release.FILES:
+        assert stub.requests.count(_object(RELEASE, name)) == 1
     assert not any(path.startswith(f"/releases/{RELEASE}/bridges") for path in stub.requests)
 
 
@@ -244,6 +246,22 @@ async def test_status_walks_back_from_the_current_release_to_the_pinned_one(
     # Each manifest is read through its release.json; no bridges are downloaded.
     assert _object(RELEASE, "manifest.json") in stub.requests
     assert not any(path.endswith(".parquet") for path in stub.requests)
+
+
+def test_the_duckdb_link_follows_the_pinned_release(tmp_path: Path) -> None:
+    for stamp in (PREVIOUS, RELEASE):
+        (tmp_path / stamp).mkdir()
+        (tmp_path / stamp / release.DUCKDB).write_text(stamp)
+
+    release.link_duckdb(tmp_path, PREVIOUS)
+    link = release.link_duckdb(tmp_path, RELEASE)
+
+    assert link == tmp_path / release.DUCKDB
+    assert link.read_text() == RELEASE
+    assert not link.readlink().is_absolute()
+    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(
+        [PREVIOUS, RELEASE, release.DUCKDB]
+    )
 
 
 def _keys(bridges: list[load.Bridge]) -> list[tuple[str, str, str]]:

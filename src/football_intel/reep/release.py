@@ -4,6 +4,10 @@
 `releases/<stamp>/release.json` that lists its files, each with a key under
 `releases/<stamp>/objects/` and a SHA-256. One of them is the manifest, which holds the files'
 checksums again, the release's quality gates and a diff from its predecessor.
+
+We load the Parquet bridges and redirects into Postgres. The release's DuckDB copy of the
+whole register is downloaded beside them for the football-docs MCP server's `resolve_entity`
+tool, which reads it through `REEP_DUCKDB_PATH`.
 """
 
 import hashlib
@@ -16,7 +20,8 @@ import httpx
 
 BASE_URL = "https://data.reep.football"
 TIMEOUT = httpx.Timeout(60.0, connect=10.0)
-FILES = ("bridges.parquet", "redirects.parquet")
+DUCKDB = "reep-register.duckdb"
+FILES = ("bridges.parquet", "redirects.parquet", DUCKDB)
 MANIFEST = "manifest.json"
 # The chain from the current release back to the pinned one is followed at most this far.
 MAX_CHAIN = 100
@@ -73,7 +78,7 @@ async def latest_release(api: httpx.AsyncClient) -> str:
 
 
 async def release_files(api: httpx.AsyncClient, release: str) -> dict[str, ReleaseFile]:
-    """The manifest and the files we load, as the release's `release.json` lists them."""
+    """The manifest and the files we download, as the release's `release.json` lists them."""
     response = await api.get(f"/releases/{release}/release.json")
     response.raise_for_status()
     listed: dict[str, Any] = response.json().get("files", {})
@@ -160,6 +165,21 @@ async def _manifest(
             f"{MANIFEST} of {release}: sha256 {actual}, release.json says {files[MANIFEST].sha256}"
         )
     return Manifest(release, json.loads(body)), body, files
+
+
+def link_duckdb(root: Path, release: str) -> Path:
+    """Point `root/reep-register.duckdb` at `release`'s copy, and return the link.
+
+    The link gives `REEP_DUCKDB_PATH` one path that follows the pinned release. It is
+    relative, so it survives moving `root`, and is swapped in by a rename, so a reader never
+    finds it missing.
+    """
+    link = root / DUCKDB
+    staged = root / f"{DUCKDB}.link"
+    staged.unlink(missing_ok=True)
+    staged.symlink_to(Path(release) / DUCKDB)
+    staged.replace(link)
+    return link
 
 
 def sha256(path: Path) -> str:
