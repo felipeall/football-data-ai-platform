@@ -11,7 +11,7 @@ scores are not proposed at all.
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from football_data_ai_platform.identity.names import similarity
@@ -265,32 +265,36 @@ def sofascore_proposals(
     sofascore: Iterable[SourcePlayer], transfermarkt: Mapping[int, SourcePlayer]
 ) -> list[Proposal]:
     """Link a Sofascore player to the Player whose Transfermarkt record (`transfermarkt`, by
-    Player ID) has the same birth date. The same name: a link. A similar name (a nickname, a
-    transliteration): left to the judge. Same birth date only: no proposal."""
+    Player ID) was born within `BIRTH_DATE_TOLERANCE_DAYS` of it. The same name: a link. A
+    similar name (a nickname, a transliteration), or a second same-named record inside the
+    window: left to the judge. Birth date only: no proposal."""
     by_birth_date: dict[date, list[tuple[int, SourcePlayer]]] = defaultdict(list)
     for player_id, record in transfermarkt.items():
         if record.birth_date is not None:
             by_birth_date[record.birth_date].append((player_id, record))
+    window = range(-BIRTH_DATE_TOLERANCE_DAYS, BIRTH_DATE_TOLERANCE_DAYS + 1)
     proposals: list[Proposal] = []
     for player in sofascore:
         if player.birth_date is None:
             continue
         scored = sorted(
             (
-                (similarity(player.name, record.name), player_id, record)
-                for player_id, record in by_birth_date[player.birth_date]
+                (similarity(player.name, record.name), abs(gap), player_id, record)
+                for gap in window
+                for player_id, record in by_birth_date[player.birth_date + timedelta(gap)]
             ),
-            key=lambda scored: (-scored[0], scored[1]),
+            key=lambda scored: (-scored[0], scored[1], scored[2]),
         )
         if not scored or scored[0][0] < JUDGE_FROM:
             continue
-        name_score, player_id, best = scored[0]
+        name_score, gap, player_id, best = scored[0]
         runner_up = scored[1][0] if len(scored) > 1 else 0.0
         evidence = {
             "name": player.name,
             "candidate": best.name,
             "transfermarkt_record_id": best.source_record_id,
             "name_similarity": round(name_score, 3),
+            "birth_date_gap_days": gap,
         }
         if name_score >= SAME_NAME and runner_up < SAME_NAME:
             method, confidence = Method.NAME_BIRTH_DATE, 1.0
