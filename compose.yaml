@@ -131,10 +131,10 @@ services:
       LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://localhost:${LANGFUSE_MINIO_PORT}
       LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: http://minio:9000
       # Headless initialisation: org, project, API keys and first user
-      LANGFUSE_INIT_ORG_ID: football-intel
-      LANGFUSE_INIT_ORG_NAME: football-intel
-      LANGFUSE_INIT_PROJECT_ID: football-intel
-      LANGFUSE_INIT_PROJECT_NAME: football-intel
+      LANGFUSE_INIT_ORG_ID: football-data-ai-platform
+      LANGFUSE_INIT_ORG_NAME: football-data-ai-platform
+      LANGFUSE_INIT_PROJECT_ID: football-data-ai-platform
+      LANGFUSE_INIT_PROJECT_NAME: football-data-ai-platform
       LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY}
       LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY}
       LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL}
